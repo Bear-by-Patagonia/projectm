@@ -44,6 +44,9 @@ void Framebuffer::Bind(int framebufferIndex)
         return;
     }
 
+    const GLenum attachments[2] = { GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT };
+    glInvalidateFramebuffer(GL_FRAMEBUFFER, 2, attachments);
+
     glBindFramebuffer(GL_FRAMEBUFFER, m_framebufferIds.at(framebufferIndex));
 
     m_readFramebuffer = m_drawFramebuffer = framebufferIndex;
@@ -75,6 +78,9 @@ void Framebuffer::BindDraw(int framebufferIndex)
 
 void Framebuffer::Unbind()
 {
+    const GLenum attachments[2] = { GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT };
+    glInvalidateFramebuffer(GL_FRAMEBUFFER, 2, attachments);
+
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 }
 
