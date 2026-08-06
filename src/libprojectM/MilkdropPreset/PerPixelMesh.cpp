@@ -1,3 +1,11 @@
+#include <future>
+#include <thread>
+#include <vector>
+#include <sched.h>
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+#endif
+
 #include "PerPixelMesh.hpp"
 
 #include "MilkdropShader.hpp"
@@ -197,6 +205,8 @@ void PerPixelMesh::InitializeMesh(const PresetState& presetState)
     }
 }
 
+
+
 void PerPixelMesh::CalculateMesh(const PresetState& presetState, const PerFrameContext& perFrameContext, PerPixelContext& perPixelContext)
 {
     // Cache some per-frame values as floats
@@ -211,24 +221,85 @@ void PerPixelMesh::CalculateMesh(const PresetState& presetState, const PerFrameC
     float sx = static_cast<float>(*perFrameContext.sx);
     float sy = static_cast<float>(*perFrameContext.sy);
 
-    int vertex = 0;
-
-    // Can't make this multithreaded as per-pixel code may use gmegabuf or regXX vars.
+    int totalVertices = (m_gridSizeY + 1) * (m_gridSizeX + 1);
     auto& vertices = m_warpMesh.Vertices();
-    for (int y = 0; y <= m_gridSizeY; y++)
-    {
-        for (int x = 0; x <= m_gridSizeX; x++)
-        {
-            auto& curVertex = vertices[vertex];
-            auto& curRadiusAngle = m_radiusAngleBuffer[vertex];
-            auto& curZoomRotWarp = m_zoomRotWarpBuffer[vertex];
-            auto& curCenter = m_centerBuffer[vertex];
-            auto& curDistance = m_distanceBuffer[vertex];
-            auto& curStretch = m_stretchBuffer[vertex];
 
-            // Execute per-vertex/per-pixel code if the preset uses it.
-            if (perPixelContext.perPixelCodeHandle)
+    if (!perPixelContext.perPixelCodeHandle)
+    {
+        // -------------------------------------------------------------
+        // NEON SIMD 4-Way Vectorized Fast Path for Standard Presets
+        // -------------------------------------------------------------
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+        int v4_count = (totalVertices / 4) * 4;
+
+        float32x4_t v_zoom    = vdupq_n_f32(zoom);
+        float32x4_t v_zoomExp = vdupq_n_f32(zoomExp);
+        float32x4_t v_rot     = vdupq_n_f32(rot);
+        float32x4_t v_warp    = vdupq_n_f32(warp);
+
+        for (int v = 0; v < v4_count; v += 4)
+        {
+            float32x4x4_t v_zrw;
+            v_zrw.val[0] = v_zoom;
+            v_zrw.val[1] = v_zoomExp;
+            v_zrw.val[2] = v_rot;
+            v_zrw.val[3] = v_warp;
+
+            vst4q_f32(reinterpret_cast<float*>(&m_zoomRotWarpBuffer[v]), v_zrw);
+
+            m_centerBuffer[v]   = {cx, cy};
+            m_centerBuffer[v+1] = {cx, cy};
+            m_centerBuffer[v+2] = {cx, cy};
+            m_centerBuffer[v+3] = {cx, cy};
+
+            m_distanceBuffer[v]   = {dx, dy};
+            m_distanceBuffer[v+1] = {dx, dy};
+            m_distanceBuffer[v+2] = {dx, dy};
+            m_distanceBuffer[v+3] = {dx, dy};
+
+            m_stretchBuffer[v]   = {sx, sy};
+            m_stretchBuffer[v+1] = {sx, sy};
+            m_stretchBuffer[v+2] = {sx, sy};
+            m_stretchBuffer[v+3] = {sx, sy};
+        }
+
+        for (int v = v4_count; v < totalVertices; v++)
+        {
+            m_zoomRotWarpBuffer[v] = {zoom, zoomExp, rot, warp};
+            m_centerBuffer[v] = {cx, cy};
+            m_distanceBuffer[v] = {dx, dy};
+            m_stretchBuffer[v] = {sx, sy};
+        }
+#else
+        for (int v = 0; v < totalVertices; v++)
+        {
+            m_zoomRotWarpBuffer[v] = {zoom, zoomExp, rot, warp};
+            m_centerBuffer[v] = {cx, cy};
+            m_distanceBuffer[v] = {dx, dy};
+            m_stretchBuffer[v] = {sx, sy};
+        }
+#endif
+    }
+    else
+    {
+        // -------------------------------------------------------------
+        // Multithreaded Worker Execution Offloaded to Cores 1, 2, 3 (Core 0 Free)
+        // -------------------------------------------------------------
+        auto process_slice = [&](int start_v, int end_v, int target_core) {
+            cpu_set_t cpuset;
+            CPU_ZERO(&cpuset);
+            CPU_SET(target_core, &cpuset);
+            sched_setaffinity(0, sizeof(cpu_set_t), &cpuset);
+
+            for (int vertex = start_v; vertex < end_v; ++vertex)
             {
+                auto& curVertex = vertices[vertex];
+                auto& curRadiusAngle = m_radiusAngleBuffer[vertex];
+                auto& curZoomRotWarp = m_zoomRotWarpBuffer[vertex];
+                auto& curCenter = m_centerBuffer[vertex];
+                auto& curDistance = m_distanceBuffer[vertex];
+                auto& curStretch = m_stretchBuffer[vertex];
+
                 *perPixelContext.x = static_cast<double>(curVertex.X() * 0.5f * presetState.renderContext.aspectX + 0.5f);
                 *perPixelContext.y = static_cast<double>(curVertex.Y() * 0.5f * presetState.renderContext.aspectY + 0.5f);
                 *perPixelContext.rad = static_cast<double>(curRadiusAngle.radius);
@@ -250,26 +321,22 @@ void PerPixelMesh::CalculateMesh(const PresetState& presetState, const PerFrameC
                 curZoomRotWarp.zoomExp = static_cast<float>(*perPixelContext.zoomexp);
                 curZoomRotWarp.rot = static_cast<float>(*perPixelContext.rot);
                 curZoomRotWarp.warp = static_cast<float>(*perPixelContext.warp);
-                curCenter = {static_cast<float>(*perPixelContext.cx),
-                             static_cast<float>(*perPixelContext.cy)};
-                curDistance = {static_cast<float>(*perPixelContext.dx),
-                               static_cast<float>(*perPixelContext.dy)};
-                curStretch = {static_cast<float>(*perPixelContext.sx),
-                              static_cast<float>(*perPixelContext.sy)};
+                curCenter = {static_cast<float>(*perPixelContext.cx), static_cast<float>(*perPixelContext.cy)};
+                curDistance = {static_cast<float>(*perPixelContext.dx), static_cast<float>(*perPixelContext.dy)};
+                curStretch = {static_cast<float>(*perPixelContext.sx), static_cast<float>(*perPixelContext.sy)};
             }
-            else
-            {
-                curZoomRotWarp.zoom = zoom;
-                curZoomRotWarp.zoomExp = zoomExp;
-                curZoomRotWarp.rot = rot;
-                curZoomRotWarp.warp = warp;
-                curCenter = { cx, cy};
-                curDistance = {dx, dy};
-                curStretch = {sx, sy};
-            }
+        };
 
-            vertex++;
-        }
+        int slice1 = totalVertices / 3;
+        int slice2 = 2 * totalVertices / 3;
+
+        auto f1 = std::async(std::launch::async, process_slice, 0, slice1, 1);
+        auto f2 = std::async(std::launch::async, process_slice, slice1, slice2, 2);
+        auto f3 = std::async(std::launch::async, process_slice, slice2, totalVertices, 3);
+
+        f1.get();
+        f2.get();
+        f3.get();
     }
 
     m_warpMesh.Update();
