@@ -41,6 +41,14 @@ const char* GLSLGenerator::s_reservedWord[] =
         "dFdy",
         "filter",
 		"main",
+        "texture",
+        "sample",
+        "smoothstep",
+        "clamp",
+        "precision",
+        "lowp",
+        "mediump",
+        "highp",
     };
 
 static const char* GetTypeName(const HLSLType& type)
@@ -322,6 +330,8 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
         }
 
         m_writer.WriteLine(0, "vec4 %s(sampler2D samp, vec4 texCoord) { return %s(samp, texCoord.xy, texCoord.w);  }", m_tex2DlodFunction, function);
+        m_writer.WriteLine(0, "vec4 %s(sampler2D samp, vec3 texCoord) { return %s(samp, texCoord.xy, texCoord.z);  }", m_tex2DlodFunction, function);
+        m_writer.WriteLine(0, "vec4 %s(sampler2D samp, vec2 texCoord, float lod) { return %s(samp, texCoord.xy, lod);  }", m_tex2DlodFunction, function);
     }
 
     // Output the special function used to emulate tex2Dgrad.
@@ -341,6 +351,10 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
         }
 
         m_writer.WriteLine(0, "vec4 %s(sampler2D samp, vec2 texCoord, vec2 dx, vec2 dy) { return %s(samp, texCoord, dx, dy);  }", m_tex2DgradFunction, function);
+        m_writer.WriteLine(0, "vec4 %s(sampler2D samp, vec3 texCoord, vec2 dx, vec2 dy) { return %s(samp, texCoord.xy, dx, dy);  }", m_tex2DgradFunction, function);
+        m_writer.WriteLine(0, "vec4 %s(sampler2D samp, vec4 texCoord, vec2 dx, vec2 dy) { return %s(samp, texCoord.xy, dx, dy);  }", m_tex2DgradFunction, function);
+        m_writer.WriteLine(0, "vec4 %s(sampler2D samp, vec2 texCoord, vec3 dx, vec3 dy) { return %s(samp, texCoord, dx.xy, dy.xy);  }", m_tex2DgradFunction, function);
+        m_writer.WriteLine(0, "vec4 %s(sampler2D samp, vec2 texCoord, vec4 dx, vec4 dy) { return %s(samp, texCoord, dx.xy, dy.xy);  }", m_tex2DgradFunction, function);
     }
 
     // Output the special function used to emulate tex2Dbias.
@@ -774,7 +788,7 @@ void GLSLGenerator::OutputExpression(HLSLExpression* expression, const HLSLType*
                         // Punt to function that does not follow IEEE 754 NaN propagation rules
                         m_writer.Write("%s(", m_altMultFunction);
                         OutputExpression(binaryExpression->expression1, dstType1);
-                        m_writer.Write(",", op);
+                        m_writer.Write(", ");
                         OutputExpression(binaryExpression->expression2, dstType2);
                         m_writer.Write(")");
                         handled = true;
@@ -2112,40 +2126,45 @@ void GLSLGenerator::OutputDeclaration(HLSLDeclaration* declaration, const bool s
 
 void GLSLGenerator::OutputDeclarationAssignment(HLSLDeclaration* declaration)
 {
-   m_writer.Write( " = " );
-   if( declaration->type.array )
-   {
-       m_writer.Write( "%s[]( ", GetTypeName( declaration->type ) );
-       OutputExpressionList( declaration->assignment );
-       m_writer.Write( " )" );
-   }
-   else
-   {
-       bool matrixCtorNeeded = false;
-       if (IsMatrixType(declaration->type.baseType))
-       {
-           matrixCtor ctor = matrixCtorBuilder(declaration->type, declaration->assignment);
-           if (std::find(matrixCtors.cbegin(), matrixCtors.cend(), ctor) != matrixCtors.cend())
-           {
-               matrixCtorNeeded = true;
-           }
-       }
+    m_writer.Write( " = " );
+    if (declaration->type.array)
+    {
+        m_writer.Write("%s[", GetTypeName(declaration->type));
+        if (declaration->type.arraySize != NULL)
+        {
+            OutputExpression(declaration->type.arraySize);
+        }
+        m_writer.Write("]( ");
+        OutputExpressionList(declaration->assignment);
+        m_writer.Write(" )");
+    }
+    else
+    {
+        bool matrixCtorNeeded = false;
+        if (IsMatrixType(declaration->type.baseType))
+        {
+            matrixCtor ctor = matrixCtorBuilder(declaration->type, declaration->assignment);
+            if (std::find(matrixCtors.cbegin(), matrixCtors.cend(), ctor) != matrixCtors.cend())
+            {
+                matrixCtorNeeded = true;
+            }
+        }
 
-       if (matrixCtorNeeded)
-       {
-           // Matrix contructors needs to be adapted since GLSL access a matrix as m[c][r] while HLSL is m[r][c]
-           matrixCtor ctor = matrixCtorBuilder(declaration->type, declaration->assignment);
-           m_writer.Write("%s(", matrixCtorsId[ctor].c_str());
-           OutputExpressionList(declaration->assignment);
-           m_writer.Write(")");
-       }
-       else
-       {
-           m_writer.Write( "%s( ", GetTypeName( declaration->type ) );
-           OutputExpressionList( declaration->assignment );
-           m_writer.Write( " )" );
-       }
-   }
+        if (matrixCtorNeeded)
+        {
+            // Matrix constructors need to be adapted since GLSL access a matrix as m[c][r] while HLSL is m[r][c]
+            matrixCtor ctor = matrixCtorBuilder(declaration->type, declaration->assignment);
+            m_writer.Write("%s(", matrixCtorsId[ctor].c_str());
+            OutputExpressionList(declaration->assignment);
+            m_writer.Write(")");
+        }
+        else
+        {
+            m_writer.Write( "%s( ", GetTypeName( declaration->type ) );
+            OutputExpressionList( declaration->assignment );
+            m_writer.Write( " )" );
+        }
+    }
 }
 
 void GLSLGenerator::OutputDeclaration(const HLSLType& type, const char* name)

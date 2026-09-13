@@ -344,33 +344,63 @@ void MilkdropShader::PreprocessPresetShader(std::string& program)
 
     size_t found;
 
-    // Find "sampler_state" overrides and remove them first, as they're not supported by GLSL.
-    // The logic isn't totally fool-proof, but should work in general.
-    // Use a comment-stripped copy for searching so commented-out sampler_state blocks are skipped.
-    // StripComments preserves string length, so positions map 1:1 to the original.
+    // Find "sampler_state" overrides and blank them out in-place (with spaces),
+    // preserving exact character positions between 'stripped' and 'program'
+    // so any functions or code defined before 'shader_body' remain synchronized and uncorrupted.
     std::string stripped = Utils::StripComments(program);
-    found = stripped.find("sampler_state");
-    while (found != std::string::npos)
+    size_t samplerPos = 0;
+    while ((samplerPos = stripped.find("sampler_state", samplerPos)) != std::string::npos)
     {
-        // Now go backwards and find the assignment
-        found = stripped.rfind('=', found);
-        auto startPos = found;
-
-        // Find closing brace and semicolon
-        found = stripped.find('}', found);
-        found = stripped.find(';', found);
-
-        if (found != std::string::npos)
+        // Search backwards for declaration start ("sampler", "sampler2D", etc.)
+        // or up to previous semicolon or brace or start of string
+        size_t declStart = stripped.rfind(';', samplerPos);
+        if (declStart == std::string::npos)
         {
-            stripped.replace(startPos, found - startPos, "");
+            declStart = 0;
         }
         else
         {
-            // No closing brace and semicolon.
-            break;
+            declStart++; // skip ';'
+        }
+        size_t braceStart = stripped.find_last_of("{}", samplerPos);
+        if (braceStart != std::string::npos && braceStart >= declStart)
+        {
+            declStart = braceStart + 1;
         }
 
-        found = stripped.find("sampler_state");
+        // Now search forward from samplerPos for '{' and matching '}' followed by optional ';'
+        size_t endPos = samplerPos + 13; // length of "sampler_state"
+        size_t openBrace = stripped.find('{', samplerPos);
+        size_t semiBeforeBrace = stripped.find(';', samplerPos);
+        if (openBrace != std::string::npos && (semiBeforeBrace == std::string::npos || openBrace < semiBeforeBrace))
+        {
+            int depth = 1;
+            size_t k = openBrace + 1;
+            while (k < stripped.length() && depth > 0)
+            {
+                if (stripped[k] == '{') depth++;
+                else if (stripped[k] == '}') depth--;
+                k++;
+            }
+            endPos = k;
+            while (endPos < stripped.length() && (stripped[endPos] == ';' || stripped[endPos] == ' ' || stripped[endPos] == '\t' || stripped[endPos] == '\r'))
+            {
+                endPos++;
+            }
+        }
+        else if (semiBeforeBrace != std::string::npos)
+        {
+            endPos = semiBeforeBrace + 1;
+        }
+
+        // Blank out in BOTH program and stripped with spaces, preserving newlines
+        for (size_t i = declStart; i < endPos && i < program.length(); ++i)
+        {
+            if (program[i] != '\n') program[i] = ' ';
+            if (stripped[i] != '\n') stripped[i] = ' ';
+        }
+
+        samplerPos = endPos;
     }
 
     // replace shader_body with entry point function
@@ -421,19 +451,6 @@ void PS(float4 _vDiffuse : COLOR,
         throw Renderer::ShaderException("[MilkdropShader] Preset " + shaderTypeString + " shader has no opening braces.");
     }
 
-    // replace "}" with return statement (this can probably be optimized for the GLSL conversion...)
-    found = program.rfind('}');
-    if (found != std::string::npos)
-    {
-        program.replace(int(found), 1, "_return_value = float4(ret.xyz, 1.0);\n"
-                                       "}\n");
-    }
-    else
-    {
-        LOG_DEBUG("[MilkdropShader] Failed " + shaderTypeString + " shader code:\n" + program);
-        throw Renderer::ShaderException("[MilkdropShader] Preset " + shaderTypeString + " shader has no closing brace.");
-    }
-
     // Find matching closing brace and cut off excess text after shader's main function
     int bracesOpen = 1;
     size_t pos = found + 1;
@@ -477,9 +494,30 @@ void PS(float4 _vDiffuse : COLOR,
         }
     }
 
-    if (pos < program.length() - 1)
+    if (bracesOpen == 0)
     {
-        program.resize(pos);
+        program.replace(pos - 1, 1, "_return_value = float4(ret.xyz, 1.0);\n}\n");
+        if (pos - 1 + 39 < program.length())
+        {
+            program.resize(pos - 1 + 39);
+        }
+    }
+    else
+    {
+        found = program.rfind('}');
+        if (found != std::string::npos)
+        {
+            program.replace(int(found), 1, "_return_value = float4(ret.xyz, 1.0);\n}\n");
+            if (found + 39 < program.length())
+            {
+                program.resize(found + 39);
+            }
+        }
+        else
+        {
+            LOG_DEBUG("[MilkdropShader] Failed " + shaderTypeString + " shader code:\n" + program);
+            throw Renderer::ShaderException("[MilkdropShader] Preset " + shaderTypeString + " shader has no closing brace.");
+        }
     }
 
     std::string fullSource; //!< Full shader source before translation, includes all uniforms etc.
@@ -623,13 +661,17 @@ void MilkdropShader::TranspileHLSLShader(const PresetState& presetState, std::st
         throw Renderer::ShaderException("Error translating HLSL " + shaderTypeString + " shader: Preprocessing failed.");
     }
 
-    // Remove previous shader declarations
-    // ToDo: Quite some presets declare a sampler_state{} struct to change the wrap mode.
-    //       The below code causes invalid syntax as it leaves part of the expression.
-    //       Leaving it in causes HLSLParser to add "sampler_XYZ = sampler2D( <unknown expression> );"
-    //       in the main() function, which is also bad...
+    // Remove previous shader and sampler declarations (single line or multiline blocks)
     std::smatch matches;
-    while (std::regex_search(sourcePreprocessed, matches, std::regex("sampler(2D|3D|)(\\s+|\\().*")))
+    while (std::regex_search(sourcePreprocessed, matches, std::regex(R"((?:uniform\s+)?sampler(?:2D|3D)?\s+[\w\d_]+(?:\s*=\s*sampler_state\s*\{[\s\S]*?\}\s*;?|\s*=\s*sampler_state\s*;?|\s*;?))")))
+    {
+        sourcePreprocessed.replace(matches.position(), matches.length(), "");
+    }
+    while (std::regex_search(sourcePreprocessed, matches, std::regex(R"(sampler_state\s*\{[\s\S]*?\}\s*;?)")))
+    {
+        sourcePreprocessed.replace(matches.position(), matches.length(), "");
+    }
+    while (std::regex_search(sourcePreprocessed, matches, std::regex(R"(sampler(?:2D|3D|)(\s+|\().*)")))
     {
         sourcePreprocessed.replace(matches.position(), matches.length(), "");
     }
