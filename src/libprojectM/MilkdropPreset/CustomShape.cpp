@@ -126,14 +126,30 @@ void CustomShape::Draw()
                                                                static_cast<float>(*m_perFrameContext.b2),
                                                                static_cast<float>(*m_perFrameContext.a2)));
 
+        float shapeAspectY = m_presetState.renderContext.aspectY;
+        float shapeAspectX = m_presetState.renderContext.aspectX;
+
+        // Handle portrait mode (H > W) where aspectX is squashed
+        if (m_presetState.renderContext.viewportSizeY > m_presetState.renderContext.viewportSizeX)
+        {
+            shapeAspectY = 1.0f;
+            shapeAspectX = static_cast<float>(m_presetState.renderContext.viewportSizeX) / static_cast<float>(m_presetState.renderContext.viewportSizeY);
+        }
+        // Handle ultra-wide screens (W/H > 16/9, i.e., aspectY < 9/16 = 0.5625f) for fullscreen backdrop shapes
+        else if (sides == 4 && static_cast<float>(*m_perFrameContext.rad) >= 1.0f && shapeAspectY < 0.5625f)
+        {
+            // Expand backdrop quad to cover ultra-wide width without leaving side letterbox stripes
+            float fillRatio = 0.5625f / shapeAspectY;
+            shapeAspectY = std::min(1.0f, shapeAspectY * fillRatio);
+        }
+
         for (int i = 1; i < sides + 1; i++)
         {
             const float cornerProgress = static_cast<float>(i - 1) / static_cast<float>(sides);
             const float angle = cornerProgress * pi * 2.0f + static_cast<float>(*m_perFrameContext.ang) + pi * 0.25f;
 
-            // Todo: There's still some issue with aspect ratio here, as everything gets squashed horizontally if Y > x.
-            vertexData[i] = Renderer::Point(vertexData[0].X() + static_cast<float>(*m_perFrameContext.rad) * cosf(angle) * m_presetState.renderContext.aspectY,
-                                            vertexData[0].Y() + static_cast<float>(*m_perFrameContext.rad) * sinf(angle));
+            vertexData[i] = Renderer::Point(vertexData[0].X() + static_cast<float>(*m_perFrameContext.rad) * cosf(angle) * shapeAspectY,
+                                            vertexData[0].Y() + static_cast<float>(*m_perFrameContext.rad) * sinf(angle) * shapeAspectX);
 
             colorData[i] = colorData[1];
         }
@@ -152,7 +168,7 @@ void CustomShape::Draw()
             shader->SetUniformInt("texture_sampler", 0);
 
             // Textured shape, either main texture or texture from "image" key
-            auto textureAspectY = m_presetState.renderContext.aspectY;
+            auto textureAspectY = shapeAspectY;
             if (m_image.empty())
             {
                 assert(!m_presetState.mainTexture.expired());
