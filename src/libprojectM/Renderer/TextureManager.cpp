@@ -73,25 +73,8 @@ void TextureManager::Preload()
     int height{};
     int channels{};
 
-    {
-        std::unique_ptr<stbi_uc, decltype(&free)> const imageData(stbi_load_from_memory(M_data, M_bytes, &width, &height, &channels, 0), free);
-
-        if (imageData.get() != nullptr)
-        {
-            auto format = TextureFormatFromChannels(channels);
-            m_textures["idlem"] = std::make_shared<Texture>("idlem", reinterpret_cast<const void*>(imageData.get()), GL_TEXTURE_2D, width, height, 0, format, format, GL_UNSIGNED_BYTE, false);
-        }
-    }
-
-    {
-        std::unique_ptr<stbi_uc, decltype(&free)> const imageData(stbi_load_from_memory(headphones_data, headphones_bytes, &width, &height, &channels, 0), free);
-
-        if (imageData.get() != nullptr)
-        {
-            auto format = TextureFormatFromChannels(channels);
-            m_textures["idleheadphones"] = std::make_shared<Texture>("idleheadphones", reinterpret_cast<const void*>(imageData.get()), GL_TEXTURE_2D, width, height, 0, format, format, GL_UNSIGNED_BYTE, false);
-        }
-    }
+    // Omit default M logo and headphones textures to guarantee 0 frames of M logo
+    (void)width; (void)height; (void)channels;
 
     // Noise textures
     m_textures["noise_lq_lite"] = MilkdropNoise::LowQualityLite();
