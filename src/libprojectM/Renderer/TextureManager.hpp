@@ -53,6 +53,8 @@ public:
      */
     auto GetSampler(const std::string& fullName) -> std::shared_ptr<class Sampler>;
 
+    auto GetSamplerForMode(GLint wrapMode, GLint filterMode) -> std::shared_ptr<class Sampler>;
+
     /**
      * @brief Purges unused textures and increments the age counter of all stored textures.
      * Also resets the scanned texture list. Must be called exactly once per preset load.

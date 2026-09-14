@@ -35,6 +35,18 @@ void TextureManager::SetCurrentPresetPath(const std::string&)
 {
 }
 
+auto TextureManager::GetSamplerForMode(GLint wrapMode, GLint filterMode) -> std::shared_ptr<Sampler>
+{
+    auto it = m_samplers.find({wrapMode, filterMode});
+    if (it != m_samplers.end())
+    {
+        return it->second;
+    }
+    auto newSampler = std::make_shared<Sampler>(wrapMode, filterMode);
+    m_samplers.emplace(std::make_pair(wrapMode, filterMode), newSampler);
+    return newSampler;
+}
+
 TextureSamplerDescriptor TextureManager::GetTexture(const std::string& fullName)
 {
     std::string unqualifiedName;
@@ -47,7 +59,7 @@ TextureSamplerDescriptor TextureManager::GetTexture(const std::string& fullName)
         return TryLoadingTexture(fullName);
     }
 
-    return {m_textures[unqualifiedName], m_samplers.at({wrapMode, filterMode}), fullName, unqualifiedName};
+    return {m_textures[unqualifiedName], GetSamplerForMode(wrapMode, filterMode), fullName, unqualifiedName};
 }
 
 auto TextureManager::GetSampler(const std::string& fullName) -> std::shared_ptr<class Sampler>
@@ -58,7 +70,7 @@ auto TextureManager::GetSampler(const std::string& fullName) -> std::shared_ptr<
 
     ExtractTextureSettings(fullName, wrapMode, filterMode, unqualifiedName);
 
-    return m_samplers.at({wrapMode, filterMode});
+    return GetSamplerForMode(wrapMode, filterMode);
 }
 
 void TextureManager::Preload()
@@ -68,6 +80,8 @@ void TextureManager::Preload()
     m_samplers.emplace(std::make_pair(GL_CLAMP_TO_EDGE, GL_NEAREST), std::make_shared<Sampler>(GL_CLAMP_TO_EDGE, GL_NEAREST));
     m_samplers.emplace(std::make_pair(GL_REPEAT, GL_LINEAR), std::make_shared<Sampler>(GL_REPEAT, GL_LINEAR));
     m_samplers.emplace(std::make_pair(GL_REPEAT, GL_NEAREST), std::make_shared<Sampler>(GL_REPEAT, GL_NEAREST));
+    m_samplers.emplace(std::make_pair(GL_MIRRORED_REPEAT, GL_LINEAR), std::make_shared<Sampler>(GL_MIRRORED_REPEAT, GL_LINEAR));
+    m_samplers.emplace(std::make_pair(GL_MIRRORED_REPEAT, GL_NEAREST), std::make_shared<Sampler>(GL_MIRRORED_REPEAT, GL_NEAREST));
 
     int width{};
     int height{};
@@ -92,7 +106,11 @@ void TextureManager::PurgeTextures()
     {
         if (texture.second->IsUserTexture())
         {
-            m_textureStats.at(texture.first).age++;
+            auto statIt = m_textureStats.find(texture.first);
+            if (statIt != m_textureStats.end())
+            {
+                statIt->second.age++;
+            }
         }
     }
 
@@ -174,7 +192,7 @@ auto TextureManager::TryLoadingTexture(const std::string& name) -> TextureSample
             uint32_t memoryBytes = loadData.width * loadData.height * (loadData.channels > 0 ? loadData.channels : 4);
             m_textureStats.insert({lowerCaseUnqualifiedName, {memoryBytes}});
             LOG_DEBUG("[TextureManager] Loaded texture \"" + unqualifiedName + "\" from callback (texture ID)");
-            return {newTexture, m_samplers.at({wrapMode, filterMode}), name, unqualifiedName};
+            return {newTexture, GetSamplerForMode(wrapMode, filterMode), name, unqualifiedName};
         }
         else if (loadData.textureId != 0)
         {
@@ -199,7 +217,7 @@ auto TextureManager::TryLoadingTexture(const std::string& name) -> TextureSample
                 uint32_t memoryBytes = width * height * channels;
                 m_textureStats.insert({lowerCaseUnqualifiedName, {memoryBytes}});
                 LOG_DEBUG("[TextureManager] Loaded texture \"" + unqualifiedName + "\" from callback (pixel data)");
-                return {newTexture, m_samplers.at({wrapMode, filterMode}), name, unqualifiedName};
+                return {newTexture, GetSamplerForMode(wrapMode, filterMode), name, unqualifiedName};
             }
             else
             {
@@ -223,21 +241,21 @@ auto TextureManager::TryLoadingTexture(const std::string& name) -> TextureSample
         if (texture)
         {
             LOG_DEBUG("[TextureManager] Loaded texture \"" + unqualifiedName + "\" from file: " + file.filePath);
-            return {texture, m_samplers.at({wrapMode, filterMode}), name, unqualifiedName};
+            return {texture, GetSamplerForMode(wrapMode, filterMode), name, unqualifiedName};
         }
     }
 
     LOG_WARN("[TextureManager] Failed to find requested texture \"" + unqualifiedName + "\"");
 
     // Return a placeholder.
-    return {m_placeholderTexture, m_samplers.at({wrapMode, filterMode}), name, unqualifiedName};
+    return {m_placeholderTexture, GetSamplerForMode(wrapMode, filterMode), name, unqualifiedName};
 }
 
 auto TextureManager::LoadTexture(const ScannedFile& file) -> std::shared_ptr<Texture>
 {
     if (m_textures.find(file.lowerCaseBaseName) != m_textures.end())
     {
-        return m_textures.at(file.lowerCaseBaseName);
+        return m_textures[file.lowerCaseBaseName];
     }
 
     int width{};
