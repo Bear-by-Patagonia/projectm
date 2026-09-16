@@ -1,5 +1,9 @@
 set(PROJECTM_VCS_VERSION "Unknown" CACHE STRING "projectM version control revision number, e.g. Git commit hash")
 
+if(CMAKE_DISABLE_FIND_PACKAGE_Git OR (PROJECTM_VCS_VERSION AND NOT PROJECTM_VCS_VERSION STREQUAL "Unknown"))
+    return()
+endif()
+
 # Currently only supporting Git.
 find_package(Git)
 
