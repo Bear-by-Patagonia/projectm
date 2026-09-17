@@ -327,5 +327,11 @@ std::shared_ptr<Shader> CopyTexture::BindShader(ShaderCache& shaderCache)
     return shader;
 }
 
+void CopyTexture::WarmUp(ShaderCache& shaderCache)
+{
+    BindShader(shaderCache);
+    Shader::Unbind();
+}
+
 } // namespace Renderer
 } // namespace libprojectM

@@ -97,6 +97,12 @@ public:
      */
     auto Texture() -> std::shared_ptr<Texture>;
 
+    /**
+     * @brief Pre-compiles and warms up the copy shader so it never stalls on the first frame after a transition.
+     * @param shaderCache The global shader cache instance.
+     */
+    void WarmUp(ShaderCache& shaderCache);
+
 private:
     /**
      * Updates the mesh

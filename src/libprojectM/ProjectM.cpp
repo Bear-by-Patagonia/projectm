@@ -235,6 +235,7 @@ void ProjectM::Initialize()
     m_transitionShaderManager = std::make_unique<Renderer::TransitionShaderManager>();
 
     m_textureCopier = std::make_unique<Renderer::CopyTexture>();
+    m_textureCopier->WarmUp(*m_shaderCache);
 
     m_spriteManager = std::make_unique<UserSprites::SpriteManager>();
 
