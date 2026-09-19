@@ -137,7 +137,9 @@ void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audio
     m_waveform.Draw(m_perFrameContext);
 
     // Done in DrawSprites() in Milkdrop
-    if (*m_perFrameContext.darken_center > 0)
+    // If the preset explicitly enables darken_center, or if it is a classic preset without
+    // a custom warp shader (preventing center singularity accumulation), softly dissipate center energy.
+    if (*m_perFrameContext.darken_center > 0 || m_state.warpShader.empty())
     {
         m_darkenCenter.Draw();
     }

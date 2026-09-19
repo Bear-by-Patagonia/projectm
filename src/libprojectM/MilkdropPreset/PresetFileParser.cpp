@@ -41,13 +41,18 @@ auto PresetFileParser::Read(std::istream& presetStream) -> bool
     size_t startPos{0}; //!< Starting position of current line
     size_t pos{0};      //!< Current read position
 
-    auto parseLineIfDataAvailable = [this, &pos, &startPos, &presetFileContents]() {
+    auto parseLineIfDataAvailable = [this, &pos, &startPos, &presetFileContents]() -> bool {
         if (pos > startPos)
         {
             auto beg = presetFileContents.begin();
             std::string line(beg + startPos, beg + pos);
+            if (line.rfind("[PRESET1_END]", 0) == 0 || line.rfind("[PRESET2_BEGIN]", 0) == 0)
+            {
+                return false;
+            }
             ParseLine(line);
         }
+        return true;
     };
 
     while (pos < presetFileContents.size())
@@ -57,7 +62,11 @@ auto PresetFileParser::Read(std::istream& presetStream) -> bool
             case '\r':
             case '\n':
                 // EOL, skip over CRLF
-                parseLineIfDataAvailable();
+                if (!parseLineIfDataAvailable())
+                {
+                    pos = presetFileContents.size();
+                    break;
+                }
                 startPos = pos + 1;
                 break;
 
