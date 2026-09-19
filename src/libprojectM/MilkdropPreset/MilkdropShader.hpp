@@ -67,6 +67,16 @@ public:
      */
     auto Shader() -> Renderer::Shader&;
 
+    /**
+     * @brief Enables or disables HDR peak brightness tone mapping in composite shaders.
+     */
+    static void SetHdrPeakModeEnabled(bool enabled);
+
+    /**
+     * @brief Checks whether HDR peak brightness mode is enabled.
+     */
+    static bool IsHdrPeakModeEnabled();
+
 private:
     /**
      * @brief Prepares the shader code to be translated into GLSL.

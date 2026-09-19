@@ -21,6 +21,18 @@ namespace MilkdropPreset {
 
 using libprojectM::MilkdropPreset::MilkdropStaticShaders;
 
+static bool s_hdrPeakModeEnabled = true;
+
+void MilkdropShader::SetHdrPeakModeEnabled(bool enabled)
+{
+    s_hdrPeakModeEnabled = enabled;
+}
+
+bool MilkdropShader::IsHdrPeakModeEnabled()
+{
+    return s_hdrPeakModeEnabled;
+}
+
 static auto floatRand = []() { return static_cast<float>(rand() % 7381) / 7380.0f; };
 
 MilkdropShader::MilkdropShader(ShaderType type)
@@ -178,10 +190,10 @@ void MilkdropShader::LoadVariables(const PresetState& presetState, const PerFram
                                       presetState.renderContext.aspectY,
                                       1.0f / presetState.renderContext.aspectX,
                                       1.0f / presetState.renderContext.aspectY});
-    m_shader.SetUniformFloat4("_c1", {0.0,
-                                      0.0,
-                                      0.0,
-                                      0.0});
+    m_shader.SetUniformFloat4("_c1", {(m_type == ShaderType::CompositeShader && s_hdrPeakModeEnabled) ? 1.0f : 0.0f,
+                                      0.0f,
+                                      0.0f,
+                                      0.0f});
     m_shader.SetUniformFloat4("_c2", {timeSincePresetStartWrapped,
                                       presetState.renderContext.fps,
                                       presetState.renderContext.frame,
@@ -293,14 +305,13 @@ void MilkdropShader::LoadVariables(const PresetState& presetState, const PerFram
     m_shader.SetUniformMat3x4("rot_rand4", tempMatrices[23]);
 
     // set program uniform "_q[a-h]" values (_qa.x, _qa.y, _qa.z, _qa.w, _qb.x, _qb.y ... ) alias q[1-32]
+    static const char* const s_qVarNames[8] = {"_qa", "_qb", "_qc", "_qd", "_qe", "_qf", "_qg", "_qh"};
     for (int i = 0; i < QVarCount; i += 4)
     {
-        std::string varName = "_q";
-        varName.push_back(static_cast<char>('a' + i / 4));
-        m_shader.SetUniformFloat4(varName.c_str(), {presetState.frameQVariables[i],
-                                                    presetState.frameQVariables[i + 1],
-                                                    presetState.frameQVariables[i + 2],
-                                                    presetState.frameQVariables[i + 3]});
+        m_shader.SetUniformFloat4(s_qVarNames[i / 4], {presetState.frameQVariables[i],
+                                                       presetState.frameQVariables[i + 1],
+                                                       presetState.frameQVariables[i + 2],
+                                                       presetState.frameQVariables[i + 3]});
     }
 
     // Bind all texture and sampler descriptors. This includes the main and blur textures.
@@ -494,12 +505,29 @@ void PS(float4 _vDiffuse : COLOR,
         }
     }
 
+    std::string returnCode;
+    if (m_type == ShaderType::CompositeShader)
+    {
+        // OLED True Black soft-knee floor: milkdrop's asymptotic feedback creates a 0.008 gray fog.
+        // Smoothly crush sub-0.006 luminance to true 0.0 nits for OLED panels.
+        // HDR peak brightness expansion: if _c1.x > 0.5 (s_hdrPeakModeEnabled), extend highlights up to 1.35x.
+        returnCode =
+            "float _pm_lum = dot(ret.xyz, float3(0.299, 0.587, 0.114));\n"
+            "if (_pm_lum < 0.006) { ret.xyz *= smoothstep(0.0, 0.006, _pm_lum); }\n"
+            "else if (_c1.x > 0.5 && _pm_lum > 0.7) { ret.xyz += (ret.xyz - 0.7) * 0.35; }\n"
+            "_return_value = float4(ret.xyz, 1.0);\n}\n";
+    }
+    else
+    {
+        returnCode = "_return_value = float4(ret.xyz, 1.0);\n}\n";
+    }
+
     if (bracesOpen == 0)
     {
-        program.replace(pos - 1, 1, "_return_value = float4(ret.xyz, 1.0);\n}\n");
-        if (pos - 1 + 39 < program.length())
+        program.replace(pos - 1, 1, returnCode);
+        if (pos - 1 + returnCode.length() < program.length())
         {
-            program.resize(pos - 1 + 39);
+            program.resize(pos - 1 + returnCode.length());
         }
     }
     else
@@ -507,10 +535,10 @@ void PS(float4 _vDiffuse : COLOR,
         found = program.rfind('}');
         if (found != std::string::npos)
         {
-            program.replace(int(found), 1, "_return_value = float4(ret.xyz, 1.0);\n}\n");
-            if (found + 39 < program.length())
+            program.replace(int(found), 1, returnCode);
+            if (found + returnCode.length() < program.length())
             {
-                program.resize(found + 39);
+                program.resize(found + returnCode.length());
             }
         }
         else

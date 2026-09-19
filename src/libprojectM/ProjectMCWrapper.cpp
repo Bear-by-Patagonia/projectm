@@ -12,6 +12,8 @@
 #include <projectM-4/parameters.h>
 #include <projectM-4/render_opengl.h>
 
+#include <MilkdropPreset/MilkdropShader.hpp>
+
 #include <cstring>
 #include <sstream>
 
@@ -241,6 +243,16 @@ void projectm_opengl_burn_texture(projectm_handle instance, uint32_t texture, in
 {
     auto projectMInstance = handle_to_instance(instance);
     projectMInstance->BurnInTexture(texture, left, top, width, height);
+}
+
+void projectm_opengl_set_hdr_peak_mode(bool enabled)
+{
+    libprojectM::MilkdropPreset::MilkdropShader::SetHdrPeakModeEnabled(enabled);
+}
+
+bool projectm_opengl_get_hdr_peak_mode()
+{
+    return libprojectM::MilkdropPreset::MilkdropShader::IsHdrPeakModeEnabled();
 }
 
 void projectm_set_frame_time(projectm_handle instance, double seconds_since_first_frame)

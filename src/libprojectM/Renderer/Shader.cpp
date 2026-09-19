@@ -42,6 +42,7 @@ void Shader::CompileProgram(const std::string& vertexShaderSource,
     glGetProgramiv(m_shaderProgram, GL_LINK_STATUS, &programLinked);
     if (programLinked == GL_TRUE)
     {
+        m_uniformLocationCache.clear();
         return;
     }
 
@@ -89,9 +90,22 @@ void Shader::Unbind()
     glUseProgram(0);
 }
 
+GLint Shader::GetCachedUniformLocation(const char* uniform) const
+{
+    auto it = m_uniformLocationCache.find(uniform);
+    if (it != m_uniformLocationCache.end())
+    {
+        return it->second;
+    }
+
+    GLint location = glGetUniformLocation(m_shaderProgram, uniform);
+    m_uniformLocationCache.emplace(uniform, location);
+    return location;
+}
+
 void Shader::SetUniformFloat(const char* uniform, float value) const
 {
-    auto location = glGetUniformLocation(m_shaderProgram, uniform);
+    auto location = GetCachedUniformLocation(uniform);
     if (location < 0)
     {
         return;
@@ -101,7 +115,7 @@ void Shader::SetUniformFloat(const char* uniform, float value) const
 
 void Shader::SetUniformInt(const char* uniform, int value) const
 {
-    auto location = glGetUniformLocation(m_shaderProgram, uniform);
+    auto location = GetCachedUniformLocation(uniform);
     if (location < 0)
     {
         return;
@@ -111,7 +125,7 @@ void Shader::SetUniformInt(const char* uniform, int value) const
 
 void Shader::SetUniformFloat2(const char* uniform, const glm::vec2& values) const
 {
-    auto location = glGetUniformLocation(m_shaderProgram, uniform);
+    auto location = GetCachedUniformLocation(uniform);
     if (location < 0)
     {
         return;
@@ -121,7 +135,7 @@ void Shader::SetUniformFloat2(const char* uniform, const glm::vec2& values) cons
 
 void Shader::SetUniformInt2(const char* uniform, const glm::ivec2& values) const
 {
-    auto location = glGetUniformLocation(m_shaderProgram, uniform);
+    auto location = GetCachedUniformLocation(uniform);
     if (location < 0)
     {
         return;
@@ -131,7 +145,7 @@ void Shader::SetUniformInt2(const char* uniform, const glm::ivec2& values) const
 
 void Shader::SetUniformFloat3(const char* uniform, const glm::vec3& values) const
 {
-    auto location = glGetUniformLocation(m_shaderProgram, uniform);
+    auto location = GetCachedUniformLocation(uniform);
     if (location < 0)
     {
         return;
@@ -141,7 +155,7 @@ void Shader::SetUniformFloat3(const char* uniform, const glm::vec3& values) cons
 
 void Shader::SetUniformInt3(const char* uniform, const glm::ivec3& values) const
 {
-    auto location = glGetUniformLocation(m_shaderProgram, uniform);
+    auto location = GetCachedUniformLocation(uniform);
     if (location < 0)
     {
         return;
@@ -151,7 +165,7 @@ void Shader::SetUniformInt3(const char* uniform, const glm::ivec3& values) const
 
 void Shader::SetUniformFloat4(const char* uniform, const glm::vec4& values) const
 {
-    auto location = glGetUniformLocation(m_shaderProgram, uniform);
+    auto location = GetCachedUniformLocation(uniform);
     if (location < 0)
     {
         return;
@@ -161,7 +175,7 @@ void Shader::SetUniformFloat4(const char* uniform, const glm::vec4& values) cons
 
 void Shader::SetUniformInt4(const char* uniform, const glm::ivec4& values) const
 {
-    auto location = glGetUniformLocation(m_shaderProgram, uniform);
+    auto location = GetCachedUniformLocation(uniform);
     if (location < 0)
     {
         return;
@@ -171,7 +185,7 @@ void Shader::SetUniformInt4(const char* uniform, const glm::ivec4& values) const
 
 void Shader::SetUniformMat3x4(const char* uniform, const glm::mat3x4& values) const
 {
-    auto location = glGetUniformLocation(m_shaderProgram, uniform);
+    auto location = GetCachedUniformLocation(uniform);
     if (location < 0)
     {
         return;
@@ -181,7 +195,7 @@ void Shader::SetUniformMat3x4(const char* uniform, const glm::mat3x4& values) co
 
 void Shader::SetUniformMat4x4(const char* uniform, const glm::mat4x4& values) const
 {
-    auto location = glGetUniformLocation(m_shaderProgram, uniform);
+    auto location = GetCachedUniformLocation(uniform);
     if (location < 0)
     {
         return;

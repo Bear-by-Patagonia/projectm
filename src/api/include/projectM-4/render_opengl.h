@@ -63,6 +63,25 @@ PROJECTM_EXPORT void projectm_opengl_render_frame_fbo(projectm_handle instance, 
  */
 PROJECTM_EXPORT void projectm_opengl_burn_texture(projectm_handle instance, uint32_t texture, int left, int top, int width, int height);
 
+/**
+ * @brief Enables or disables HDR peak brightness mode in preset composite shaders.
+ *
+ * When enabled, highlights are extended and peak brightness boosted for HDR displays.
+ * When disabled (cinema mode), peak brightness is clamped to prevent glare.
+ *
+ * @param enabled True to enable HDR peak brightness boost, false to disable.
+ * @since 4.2.1
+ */
+PROJECTM_EXPORT void projectm_opengl_set_hdr_peak_mode(bool enabled);
+
+/**
+ * @brief Returns whether HDR peak brightness mode is currently enabled.
+ *
+ * @return True if HDR peak brightness mode is enabled, false otherwise.
+ * @since 4.2.1
+ */
+PROJECTM_EXPORT bool projectm_opengl_get_hdr_peak_mode();
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
