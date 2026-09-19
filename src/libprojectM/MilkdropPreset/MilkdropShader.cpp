@@ -505,27 +505,7 @@ void PS(float4 _vDiffuse : COLOR,
         }
     }
 
-    std::string returnCode;
-    if (m_type == ShaderType::CompositeShader)
-    {
-        // OLED True Black soft-knee floor: milkdrop's asymptotic feedback creates a 0.008 gray fog.
-        // Smoothly crush sub-0.006 luminance to true 0.0 nits for OLED panels using Hermite curve.
-        // HDR peak brightness expansion: if _c1.x > 0.5 (s_hdrPeakModeEnabled), extend highlights up to 1.35x.
-        returnCode =
-            "{\n"
-            "    float _pm_lum = dot(ret.xyz, float3(0.299, 0.587, 0.114));\n"
-            "    float _pm_t = saturate(_pm_lum * 166.6667);\n"
-            "    ret.xyz *= (_pm_t * _pm_t * (3.0 - 2.0 * _pm_t));\n"
-            "    if (_c1.x > 0.5 && _pm_lum > 0.7) {\n"
-            "        ret.xyz += (ret.xyz - float3(0.7, 0.7, 0.7)) * 0.35;\n"
-            "    }\n"
-            "}\n"
-            "_return_value = float4(ret.xyz, 1.0);\n}\n";
-    }
-    else
-    {
-        returnCode = "_return_value = float4(ret.xyz, 1.0);\n}\n";
-    }
+    std::string returnCode = "_return_value = float4(ret.xyz, 1.0);\n}\n";
 
     if (bracesOpen == 0)
     {
