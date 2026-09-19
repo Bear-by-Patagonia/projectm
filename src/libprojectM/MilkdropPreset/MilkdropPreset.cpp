@@ -116,6 +116,8 @@ void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audio
     m_perPixelMesh.Draw(m_state, m_perFrameContext, m_perPixelContext);
 
     // Remove the u/v texture from the framebuffer.
+    const GLenum uvAttachment = GL_COLOR_ATTACHMENT1;
+    glInvalidateFramebuffer(GL_FRAMEBUFFER, 1, &uvAttachment);
     m_framebuffer.RemoveColorAttachment(m_currentFrameBuffer, 1);
 
     // Update blur textures
@@ -152,6 +154,10 @@ void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audio
     // We no longer need the previous frame image, use it to render the final composite.
     m_framebuffer.BindRead(m_currentFrameBuffer);
     m_framebuffer.BindDraw(m_previousFrameBuffer);
+
+    // Invalidate stale content in destination framebuffer before drawing final composite
+    const GLenum drawDiscards[] = { GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT };
+    glInvalidateFramebuffer(GL_DRAW_FRAMEBUFFER, 3, drawDiscards);
 
     m_finalComposite.Draw(m_state, m_perFrameContext);
 

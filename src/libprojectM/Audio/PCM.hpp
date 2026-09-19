@@ -15,9 +15,13 @@
 
 #include <projectM-4/projectM_cxx_export.h>
 
+#include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
 #include <mutex>
+#include <thread>
+#include <vector>
 
 
 namespace libprojectM {
@@ -26,6 +30,9 @@ namespace Audio {
 class PROJECTM_CXX_EXPORT PCM
 {
 public:
+    PCM();
+    ~PCM();
+
     /**
      * @brief Adds new interleaved floating-point PCM data to the buffer.
      * Left channel is expected at offset 0, right channel at offset 1. Other channels are ignored.
@@ -73,6 +80,9 @@ public:
     auto GetFrameAudioData() const -> FrameAudioData;
 
 private:
+    void WorkerLoop();
+    void ProcessAudioData(double secondsSinceLastFrame, uint32_t frame);
+
     template<
         int signalAmplitude,
         int signalOffset,
@@ -90,6 +100,23 @@ private:
     void CopyNewWaveformData(const WaveformBuffer& source, WaveformBuffer& destination);
 
     std::mutex m_pcmMutex; //!< Protects the circular input buffer from concurrent access.
+
+    // Audio Worker Thread decoupling
+    std::thread m_workerThread;
+    std::atomic<bool> m_workerRunning{false};
+    std::condition_variable m_workerCv;
+    std::mutex m_workerMutex;
+    std::atomic<bool> m_audioDirty{false};
+    std::atomic<double> m_pendingSecondsSinceLastFrame{1.0 / 60.0};
+    std::atomic<uint32_t> m_pendingFrame{0};
+
+    // Double-buffered lock-free audio snapshots
+    mutable FrameAudioData m_audioSnapshots[2]{};
+    mutable std::atomic<uint32_t> m_activeSnapshotIndex{0};
+
+    // Preallocated FFT buffers (zero heap allocations per frame)
+    std::vector<float> m_fftWaveformSamples;
+    std::vector<float> m_fftSpectralData;
 
     // External input buffer
     WaveformBuffer m_inputBufferL{0.f}; //!< Circular buffer for left-channel PCM data.

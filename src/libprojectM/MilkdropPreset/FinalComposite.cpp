@@ -14,9 +14,6 @@ static std::string const defaultCompositeShader =
     "shader_body\n"
     "{\n"
     "ret = tex2D(sampler_main, uv).xyz;\n"
-    "float _pm_lum = dot(ret.xyz, float3(0.299, 0.587, 0.114));\n"
-    "if (_pm_lum < 0.006) { ret.xyz *= smoothstep(0.0, 0.006, _pm_lum); }\n"
-    "else if (_c1.x > 0.5 && _pm_lum > 0.7) { ret.xyz += (ret.xyz - 0.7) * 0.35; }\n"
     "}";
 
 FinalComposite::FinalComposite()
