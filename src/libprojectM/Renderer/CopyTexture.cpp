@@ -92,7 +92,31 @@ float TriangularDither(vec2 coord) {
     return (r1 + r2 - 1.0) / 255.0;
 }
 
-// --- Perceptual Color Science Pipeline (MilkyWave Symmetrical Master) ---
+// --- Perceptual Color Space Constants (OKLab / OKLCH) ---
+const mat3 kLinRGBToLMS = mat3(
+    0.4122214708, 0.2119034982, 0.0883024619,
+    0.5363325363, 0.6806995451, 0.2817188376,
+    0.0514459929, 0.1073969566, 0.6299787005
+);
+
+const mat3 kLMSToOKLab = mat3(
+    0.2104542553, 1.9779984951, 0.0259040371,
+    0.7936177850, -2.4285922050, 0.7827717662,
+    -0.0040720468, 0.4505937099, -0.8086757660
+);
+
+const mat3 kOKLabToLMS = mat3(
+    1.00000000, 1.00000001, 1.00000005,
+    0.39633779, -0.10556134, -0.08948418,
+    0.21580376, -0.06385417, -1.29148554
+);
+
+const mat3 kLMSToLinearP3 = mat3(
+    3.12776915, -1.09101011, -0.02600875,
+    -2.25713598, 2.41333293, -0.50804375,
+    0.12936683, -0.32232282, 1.53405250
+);
+
 void main() {
     vec4 src = texture(texture_sampler, fragment_tex_coord);
 
@@ -108,45 +132,85 @@ void main() {
     vec3 outColor;
 
     if (u_wide_gamut_mode == 1) {
-        // --- Perceptual Color Science Pipeline (MilkyWave Symmetrical Master) ---
-        // 1. Highlight Detail Preservation Shoulder (IMAX DMR / Filmic Roll-off):
-        // Softens blinding peak white burn-out, revealing subtle animation details, lasers and waveform lines.
-        float Y = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
-        if (Y > 0.72) {
-            float over = Y - 0.72;
-            float shoulder = over / (1.0 + over * 1.8);
+        // --- Display P3 Master Pipeline (OKLCH Perceptual Gamut Extension) ---
+        vec3 linRGB = sRGBToLinear(rgb);
+
+        // 1. Spectral Harmonization (Subpixel Cushioning):
+        // Profile 0 (Natural): 3.5% cushioning -> velvety, organic, dye-transfer density (Wizard of Oz / Back to the Future)
+        // Profile 1 (Vivid):   2.0% cushioning -> maximum punchy vibrancy (Caribbean 4K HDR)
+        // Rows sum to 1.0, preserving neutral D65 white point bit-exactly.
+        float cushion = (u_color_profile == 1) ? 0.020 : 0.035;
+        float diag = 1.0 - 2.0 * cushion;
+        mat3 spectralHarmonize = mat3(
+            diag, cushion, cushion, // Column 0
+            cushion, diag, cushion, // Column 1
+            cushion, cushion, diag  // Column 2
+        );
+        vec3 harmLin = spectralHarmonize * linRGB;
+
+        // 2. Transform to OKLab Perceptual Uniform Color Space:
+        vec3 lms = kLinRGBToLMS * harmLin;
+        vec3 lms_ = pow(max(lms, vec3(0.0)), vec3(1.0 / 3.0));
+        vec3 lab = kLMSToOKLab * lms_;
+
+        float L = lab.x;
+        float C = length(lab.yz);
+
+        // Highlight Detail Preservation Shoulder (IMAX DMR / Filmic Roll-off):
+        // Softens blinding peak white burn-out, preserving fine waveform, particle, and animation details.
+        if (L > 0.72) {
+            float over = L - 0.72;
             float maxOver = 0.28;
-            float maxShoulder = maxOver / (1.0 + maxOver * 1.8);
-            float newY = 0.72 + shoulder * (0.22 / maxShoulder);
-            rgb *= (newY / max(Y, 1e-6));
-            Y = newY;
+            float shoulder = over / (1.0 + over * 1.6);
+            L = 0.72 + shoulder * (0.22 / (maxOver / (1.0 + maxOver * 1.6)));
+            lab.x = L;
         }
 
-        // 2. Isometric 360° Rec.709 Gamut Extension with Highlight Taper & Strict R/G/B Symmetry:
-        // By anchoring to isometric intensity I = (R+G+B)/3, Red, Green, and Blue receive exactly
-        // identical chromatic magnitude (||c|| = 0.8165), completely preventing Red or Blue from over-saturating.
-        float I = (rgb.r + rgb.g + rgb.b) * 0.33333333;
-        vec3 c = rgb - vec3(I);
-        vec3 posHeadroom = (vec3(1.0) - vec3(I)) / max(c, vec3(1e-5));
-        vec3 negHeadroom = vec3(I) / max(-c, vec3(1e-5));
-        vec3 limits = mix(negHeadroom, posHeadroom, step(vec3(0.0), c));
-        float gamutLimit = min(min(limits.r, limits.g), limits.b);
+        // 3. Dolby Vision-Inspired Cusp Gamut Extension with Hue Angle Locking:
+        // Profile 0 (Natural): Gentle +16% expansion, relaxed, non-fatiguing, wide color breathing
+        // Profile 1 (Vivid):   Punchy +38% expansion into full P3 volume
+        // Hue angle is 100.0% mathematically locked to prevent any Hue Twisting (Abney effect).
+        if (C > 1e-6) {
+            float c2 = C * C;
+            float maxBoost = (u_color_profile == 1) ? 0.38 : 0.16;
+            float midPoint = (u_color_profile == 1) ? 0.0049 : 0.0064;
+            float chromaScale = 1.0 + maxBoost * (c2 / (c2 + midPoint));
 
-        // Dolby Volumetric Highlight Taper:
-        // Full, rich gamut vibrance in midtones and shadows; smoothly tapers off in bright highlights (> 0.50)
-        // so that bright zones maintain rich tonal nuance instead of screaming flat saturation.
-        float highlightTaper = clamp(1.0 - max(0.0, I - 0.50) / 0.45, 0.0, 1.0);
+            // Dolby Specular Hot-Core (Volumetric Cusp Roll-Off):
+            // As luminance approaches peak, chroma smoothly contracts along the cusp envelope,
+            // producing a white-hot incandescence center surrounded by a rich chromatic halo.
+            float rollStart = (u_color_profile == 1) ? 0.82 : 0.78;
+            if (L > rollStart) {
+                float t = (L - rollStart) / (1.0 - rollStart);
+                chromaScale *= (1.0 - t * t * 0.40);
+            }
 
-        float maxBoost = (u_color_profile == 1) ? 0.22 : 0.10;
-        float headroom = max(0.0, gamutLimit - 1.0);
-        float boostAmount = maxBoost * highlightTaper * (headroom / (headroom + 0.45));
-        float scale = 1.0 + boostAmount;
-        outColor = vec3(I) + c * scale;
+            // Dolby Clean Shadow Toe: avoids noisy chroma in deep low-light regions
+            if (L < 0.05) {
+                chromaScale *= smoothstep(0.005, 0.05, L);
+            }
 
-        // 3. Dolby Vision Continuous Shadow Toe (C1 Continuity):
-        // Bit-exact 0.000 nits on true blacks while ensuring smooth continuous emergence.
-        float blackToe = smoothstep(0.0015, 0.008, Y);
-        outColor *= blackToe;
+            lab.yz *= chromaScale;
+        }
+
+        // 4. Transform from OKLab to Linear Display P3:
+        vec3 lmsBack = kOKLabToLMS * lab;
+        vec3 p3Lin = kLMSToLinearP3 * (lmsBack * lmsBack * lmsBack);
+
+        // 5. Cinema Soft-Knee Gamut Compression:
+        // Smooth hyperbolic compression as channels approach peak, preventing hard digital clipping.
+        float thresh = (u_color_profile == 1) ? 0.88 : 0.85;
+        vec3 excess = max(p3Lin - vec3(thresh), vec3(0.0));
+        p3Lin = min(p3Lin, vec3(thresh)) + (1.0 - thresh) * (excess / (vec3(1.0) + excess));
+
+        // 6. Dolby Vision Continuous Shadow Toe (C1 Continuity):
+        // Prevents harsh near-black contouring lines while ensuring 100% 0.000 nits on true blacks.
+        // Below L < 0.008, applies smooth hermite roll-off reaching bit-exact 0.0 at L <= 0.0015.
+        float blackToe = smoothstep(0.0015, 0.008, L);
+        p3Lin *= blackToe;
+
+        // 7. Display P3 Gamma Encode (Gamma 2.2 standard transfer function):
+        outColor = pow(clamp(p3Lin, 0.0, 1.0), vec3(1.0 / 2.2));
     } else {
         // Standard sRGB Calibrated Mode
         outColor = rgb;
