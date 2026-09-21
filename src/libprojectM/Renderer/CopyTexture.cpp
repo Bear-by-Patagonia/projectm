@@ -156,7 +156,7 @@ void main() {
         float L = lab.x;
         float C = length(lab.yz);
 
-        // 3. Sigmoidal Gamut Extension (GEA) with Hue Angle Locking:
+        // 3. Dolby Vision-Inspired Cusp Gamut Extension with Hue Angle Locking:
         // Profile 0 (Natural): Gentle +16% expansion, relaxed, non-fatiguing, wide color breathing
         // Profile 1 (Vivid):   Punchy +38% expansion into full P3 volume
         // Hue angle is 100.0% mathematically locked to prevent any Hue Twisting (Abney effect).
@@ -166,16 +166,18 @@ void main() {
             float midPoint = (u_color_profile == 1) ? 0.0049 : 0.0064;
             float chromaScale = 1.0 + maxBoost * (c2 / (c2 + midPoint));
 
-            // Specular glint roll-off (Highlight Cusp - prevents neon highlights / plastic skin)
+            // Dolby Specular Hot-Core (Volumetric Cusp Roll-Off):
+            // As luminance approaches peak, chroma smoothly contracts along the cusp envelope,
+            // producing a white-hot incandescence center surrounded by a rich chromatic halo.
             float rollStart = (u_color_profile == 1) ? 0.82 : 0.78;
             if (L > rollStart) {
                 float t = (L - rollStart) / (1.0 - rollStart);
-                chromaScale *= (1.0 - t * 0.30);
+                chromaScale *= (1.0 - t * t * 0.40);
             }
 
-            // Shadow Clean Roll-Off: ensures pure neutral darks without colored noise
+            // Dolby Clean Shadow Toe: avoids noisy chroma in deep low-light regions
             if (L < 0.05) {
-                chromaScale *= (L / 0.05);
+                chromaScale *= smoothstep(0.005, 0.05, L);
             }
 
             lab.yz *= chromaScale;
@@ -191,11 +193,11 @@ void main() {
         vec3 excess = max(p3Lin - vec3(thresh), vec3(0.0));
         p3Lin = min(p3Lin, vec3(thresh)) + (1.0 - thresh) * (excess / (vec3(1.0) + excess));
 
-        // 6. Strict 0-Nit OLED Black Clamp:
-        // When content is dark, organic subpixels are 100% shut off.
-        if (L < 0.003) {
-            p3Lin = vec3(0.0);
-        }
+        // 6. Dolby Vision Continuous Shadow Toe (C1 Continuity):
+        // Prevents harsh near-black contouring lines while ensuring 100% 0.000 nits on true blacks.
+        // Below L < 0.008, applies smooth hermite roll-off reaching bit-exact 0.0 at L <= 0.0015.
+        float blackToe = smoothstep(0.0015, 0.008, L);
+        p3Lin *= blackToe;
 
         // 7. Display P3 Gamma Encode (Gamma 2.2 standard transfer function):
         outColor = pow(clamp(p3Lin, 0.0, 1.0), vec3(1.0 / 2.2));
@@ -204,15 +206,14 @@ void main() {
         outColor = rgb;
     }
 
-    // Gate dithering strictly off on blacks (lum < 0.015)
+    // Gate dithering strictly off on near-blacks (lum < 0.012)
     float lum = dot(outColor, vec3(0.2126, 0.7152, 0.0722));
-    float ditherGate = smoothstep(0.015, 0.06, lum);
+    float ditherGate = smoothstep(0.012, 0.050, lum);
     outColor += vec3(TriangularDither(gl_FragCoord.xy)) * ditherGate;
 
-    // Strict 0-nit black enforcement
-    if (lum < 0.003) {
-        outColor = vec3(0.0);
-    }
+    // Dolby Vision Display Management: Final 0-Nit True Black Hermite Gate
+    float finalBlackGate = smoothstep(0.0015, 0.006, lum);
+    outColor *= finalBlackGate;
 
     // Guarantee 100% solid opacity: 0-nit true OLED black, zero background alpha leak
     color = vec4(clamp(outColor, 0.0, 1.0), 1.0);
