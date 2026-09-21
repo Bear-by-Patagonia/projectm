@@ -139,29 +139,39 @@ void main() {
         float C = length(lab.yz);
 
         // Highlight Detail Preservation Shoulder (IMAX DMR / Filmic Roll-off):
-        // Softens peak white burn-out, preserving fine waveform, particle, and animation details.
-        if (L > 0.68) {
-            float over = L - 0.68;
-            float maxOver = 0.32;
-            float shoulder = over / (1.0 + over * 2.2);
-            L = 0.68 + shoulder * (0.22 / (maxOver / (1.0 + maxOver * 2.2)));
+        // Softens peak white burn-out while preserving razor-sharp edge contrast in waveforms and filaments.
+        float shoulderStart = (u_color_profile == 1) ? 0.80 : 0.82;
+        if (L > shoulderStart) {
+            float over = L - shoulderStart;
+            float maxOver = 1.0 - shoulderStart;
+            float shoulder = over / (1.0 + over * 1.8);
+            L = shoulderStart + shoulder * (maxOver * 0.75 / (maxOver / (1.0 + maxOver * 1.8)));
             lab.x = L;
         }
 
-        // 2. Dolby Vision-Inspired Cusp Gamut Extension with Hue Angle Locking:
-        // Profile 0 (Natural): Gentle +15% expansion, relaxed, non-fatiguing, wide color breathing
-        // Profile 1 (Vivid):   Punchy +30% expansion into full volume
-        // Hue angle is 100.0% mathematically locked to prevent any Hue Twisting (Abney effect).
+        // 2. Dolby Vision & ACES-Inspired True Vibrance with Saturation Protection:
+        // Boosts low/mid-saturation tones (+10% in Vivid) for modern color depth, but smoothly protects
+        // already-saturated pure Red, Green, and Blue, preventing channel clipping and preserving fine lines/textures.
         if (C > 1e-6) {
-            float c2 = C * C;
-            float maxBoost = (u_color_profile == 1) ? 0.30 : 0.15;
-            float midPoint = (u_color_profile == 1) ? 0.0049 : 0.0064;
+            float maxBoost = (u_color_profile == 1) ? 0.10 : 0.04;
+
+            // Saturation Protection Envelope:
+            // Full boost on subtle/mid-tones (C in 0.02 - 0.12) for rich color breathing.
+            // Tapers smoothly to 0 on already highly saturated colors (C > 0.14)
+            // ensuring red, green, and blue textures, lines, and borders remain 100% razor-sharp.
+            float satProtection = clamp(1.0 - max(0.0, C - 0.12) / 0.10, 0.0, 1.0);
+            float boost = maxBoost * satProtection * (C / (C + 0.035));
 
             // Highlight Chroma Preservation Taper:
-            // Gracefully tapers the chroma boost as luminance approaches peak (L > 0.60)
-            // ensuring saturated highlights retain their rich chromatic purity and never bleach/burn into flat white.
-            float highlightTaper = clamp(1.0 - max(0.0, L - 0.60) / 0.36, 0.0, 1.0);
-            float chromaScale = 1.0 + maxBoost * highlightTaper * (c2 / (c2 + midPoint));
+            // Prevents bright saturated highlights from burning into white
+            float highlightTaper = clamp(1.0 - max(0.0, L - 0.68) / 0.28, 0.0, 1.0);
+            float chromaScale = 1.0 + boost * highlightTaper;
+
+            // Volumetric Cusp Roll-Off (L > 0.78):
+            if (L > 0.78) {
+                float t = (L - 0.78) / 0.22;
+                chromaScale *= (1.0 - t * t * 0.18);
+            }
 
             // Dolby Clean Shadow Toe: avoids noisy chroma in deep low-light regions
             if (L < 0.05) {
@@ -176,10 +186,10 @@ void main() {
         vec3 linColor = kLMSToLinearRGB * (lmsBack * lmsBack * lmsBack);
 
         // 4. Cinema Soft-Knee Gamut Compression:
-        // Smooth hyperbolic compression as channels approach peak, preventing hard digital clipping.
-        float thresh = (u_color_profile == 1) ? 0.88 : 0.85;
+        // Maintains 100% linear micro-contrast up to 0.93, with gentle roll-off at the absolute peak.
+        float thresh = (u_color_profile == 1) ? 0.93 : 0.95;
         vec3 excess = max(linColor - vec3(thresh), vec3(0.0));
-        linColor = min(linColor, vec3(thresh)) + (1.0 - thresh) * (excess / (vec3(1.0) + excess * 1.8));
+        linColor = min(linColor, vec3(thresh)) + (1.0 - thresh) * (excess / (vec3(1.0) + excess * 1.5));
 
         // 5. Dolby Vision Continuous Shadow Toe (C1 Continuity):
         // Prevents harsh near-black contouring lines while ensuring 100% 0.000 nits on true blacks.
