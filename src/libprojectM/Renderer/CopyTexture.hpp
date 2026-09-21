@@ -25,6 +25,14 @@ public:
     static bool IsWideGamutEnabled();
 
     /**
+     * @brief Marks this instance as the final presentation copier to the screen.
+     * When true, applies Cinema Display P3 Remastering, 0-nit OLED black gating, and spatial dithering.
+     * When false (default, e.g. internal preset flip filters), performs a pure 1:1 bit-exact texture copy.
+     */
+    void SetIsScreenPresentation(bool enable);
+    bool IsScreenPresentation() const;
+
+    /**
      * @brief Copies the original texture into the currently bound framebuffer.
      * @param shaderCache The global shader cache instance.
      * @param originalTexture The texture to be copied.
@@ -128,6 +136,7 @@ private:
 
     int m_width{};  //!< Last known framebuffer/texture width
     int m_height{}; //!< Last known framebuffer/texture height
+    bool m_isScreenPresentation{false}; //!< True only for the final output blit to the screen
     std::shared_ptr<Shader> BindShader(ShaderCache& shaderCache);
 };
 

@@ -37,6 +37,16 @@ bool CopyTexture::IsWideGamutEnabled()
     return s_wideGamutEnabled;
 }
 
+void CopyTexture::SetIsScreenPresentation(bool enable)
+{
+    m_isScreenPresentation = enable;
+}
+
+bool CopyTexture::IsScreenPresentation() const
+{
+    return m_isScreenPresentation;
+}
+
 extern "C" __attribute__((visibility("default"))) void projectm_set_wide_gamut_mode(bool enabled)
 {
     CopyTexture::SetWideGamutEnabled(enabled);
@@ -48,6 +58,7 @@ precision highp float;
 in vec2 fragment_tex_coord;
 
 uniform sampler2D texture_sampler;
+uniform int u_is_screen_presentation;
 uniform int u_wide_gamut_mode;
 
 out vec4 color;
@@ -57,11 +68,6 @@ vec3 sRGBToLinear(vec3 c) {
     return pow(max(c, vec3(0.0)), vec3(2.2));
 }
 
-// Fast linear to display gamma (2.2)
-vec3 linearToDisplayGamma(vec3 c) {
-    return pow(max(c, vec3(0.0)), vec3(1.0 / 2.2));
-}
-
 // High-frequency spatial dither to eliminate banding and posterization
 float TriangularDither(vec2 coord) {
     float r1 = fract(sin(dot(coord, vec2(12.9898, 78.233))) * 43758.5453);
@@ -69,42 +75,41 @@ float TriangularDither(vec2 coord) {
     return (r1 + r2 - 1.0) / 255.0;
 }
 
-void main(){
+void main() {
     vec4 src = texture(texture_sampler, fragment_tex_coord);
-    vec3 rgb = clamp(src.rgb, 0.0, 1.0);
 
+    // If this is an internal texture copy/flip pass (e.g. MilkDrop feedback loop),
+    // perform a bit-exact 1:1 copy so preset colors and feedback loops are never corrupted.
+    if (u_is_screen_presentation == 0) {
+        color = src;
+        return;
+    }
+
+    // --- Final Screen Presentation Pass ---
+    vec3 rgb = clamp(src.rgb, 0.0, 1.0);
     vec3 outColor;
 
     if (u_wide_gamut_mode == 1) {
         // --- Calibrated Cinema Remaster (Display P3) ---
-        // Maps linear sRGB into calibrated Display P3 with an 18% gamut volume expansion.
-        // Guarantees:
-        // 1. D65 white point perfectly preserved (every row sums to 1.0).
-        // 2. Strict non-negativity: zero negative RGB channels, zero channel clipping.
-        // 3. No snapping to raw primary walls (255, 0, 0); transitions remain gradual and nuanced.
-        // 4. OLED colors are rich, deep, and cinematic without neon / fluorescent distortion.
         vec3 linRGB = sRGBToLinear(rgb);
 
-        // --- Luminance-Dependent Chroma Tapering ---
-        // Mimics the physical cusp of color volumes and human optics:
-        // - Highlight shoulder (lum > 0.65): gently tapers chroma towards an incandescent, glowing white-hot core.
-        // - Toe shadow (lum < 0.08): cleanly desaturates deep shadows toward 0-nit black, eliminating muddy noise.
-        // - Midtones (0.15 - 0.65): 100% full Display P3 rich saturation.
-        float lumLin = dot(linRGB, vec3(0.2126, 0.7152, 0.0722));
-        float highTaper = mix(1.0, 0.65, smoothstep(0.65, 1.0, lumLin));
-        float lowTaper = smoothstep(0.01, 0.08, lumLin);
-        vec3 taperedLin = mix(vec3(lumLin), linRGB, lowTaper * highTaper);
-
+        // Standard CIE D65 Matrix with 18% Cinema P3 volume expansion
         mat3 srgbToP3Cinema = mat3(
             0.8544, 0.0272, 0.0140, // Column 0
             0.1456, 0.9728, 0.0594, // Column 1
             0.0000, 0.0000, 0.9266  // Column 2
         );
 
-        vec3 p3Lin = srgbToP3Cinema * taperedLin;
-        outColor = linearToDisplayGamma(clamp(p3Lin, 0.0, 1.0));
+        vec3 p3Lin = srgbToP3Cinema * linRGB;
+
+        // Filmic highlight compression: softly tames blinding peaks so colors keep their rich identity
+        // instead of washing out into white or glaring harshly on OLED displays.
+        vec3 filmicP3 = p3Lin / (vec3(1.0) + 0.20 * p3Lin) * 1.20;
+
+        // Cinema OLED Gamma BT.1886 (2.35): deepens color presence and velvet contrast
+        outColor = pow(clamp(filmicP3, 0.0, 1.0), vec3(1.0 / 2.35));
     } else {
-        // --- Standard sRGB Calibrated Mode ---
+        // Standard sRGB Calibrated Mode
         outColor = rgb;
     }
 
@@ -344,6 +349,7 @@ void CopyTexture::Copy(ShaderCache& shaderCache,
     std::shared_ptr<Shader> shader = BindShader(shaderCache);
 
     shader->SetUniformInt("texture_sampler", 0);
+    shader->SetUniformInt("u_is_screen_presentation", m_isScreenPresentation ? 1 : 0);
     shader->SetUniformInt("u_wide_gamut_mode", s_wideGamutEnabled ? 1 : 0);
     shader->SetUniformMat4x4("vertex_transformation", flipMatrix);
 
@@ -370,6 +376,7 @@ void CopyTexture::Copy(ShaderCache& shaderCache,
     std::shared_ptr<Shader> shader = BindShader(shaderCache);
 
     shader->SetUniformInt("texture_sampler", 0);
+    shader->SetUniformInt("u_is_screen_presentation", m_isScreenPresentation ? 1 : 0);
     shader->SetUniformInt("u_wide_gamut_mode", s_wideGamutEnabled ? 1 : 0);
     shader->SetUniformMat4x4("vertex_transformation", translationMatrix);
 
