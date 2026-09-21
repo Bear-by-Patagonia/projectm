@@ -26,7 +26,7 @@ void main() {
 )";
 
 static bool s_wideGamutEnabled = true;
-static int s_colorProfile = 0; // Default: 0 = Natural (Cinema Reference, less saturated)
+static int s_colorProfile = 1; // Default: 1 = Vivid (Vibrante 4K), 0 = Natural (Cinematográfico Natural)
 
 void CopyTexture::SetWideGamutEnabled(bool enabled)
 {
@@ -85,12 +85,7 @@ vec3 sRGBToLinear(vec3 c) {
     return pow(max(c, vec3(0.0)), vec3(2.2));
 }
 
-// High-frequency spatial dither to eliminate banding and posterization
-float TriangularDither(vec2 coord) {
-    float r1 = fract(sin(dot(coord, vec2(12.9898, 78.233))) * 43758.5453);
-    float r2 = fract(sin(dot(coord + vec2(0.5, 0.5), vec2(12.9898, 78.233))) * 43758.5453);
-    return (r1 + r2 - 1.0) / 255.0;
-}
+
 
 // --- Perceptual Color Space Constants (OKLab / OKLCH) ---
 const mat3 kLinRGBToLMS = mat3(
@@ -216,12 +211,8 @@ void main() {
         outColor = rgb;
     }
 
-    // Gate dithering strictly off on near-blacks (lum < 0.012)
-    float lum = dot(outColor, vec3(0.2126, 0.7152, 0.0722));
-    float ditherGate = smoothstep(0.012, 0.050, lum);
-    outColor += vec3(TriangularDither(gl_FragCoord.xy)) * ditherGate;
-
     // Dolby Vision Display Management: Final 0-Nit True Black Hermite Gate
+    float lum = dot(outColor, vec3(0.2126, 0.7152, 0.0722));
     float finalBlackGate = smoothstep(0.0015, 0.006, lum);
     outColor *= finalBlackGate;
 
