@@ -85,13 +85,23 @@ void main(){
         // 4. OLED colors are rich, deep, and cinematic without neon / fluorescent distortion.
         vec3 linRGB = sRGBToLinear(rgb);
 
+        // --- Luminance-Dependent Chroma Tapering ---
+        // Mimics the physical cusp of color volumes and human optics:
+        // - Highlight shoulder (lum > 0.65): gently tapers chroma towards an incandescent, glowing white-hot core.
+        // - Toe shadow (lum < 0.08): cleanly desaturates deep shadows toward 0-nit black, eliminating muddy noise.
+        // - Midtones (0.15 - 0.65): 100% full Display P3 rich saturation.
+        float lumLin = dot(linRGB, vec3(0.2126, 0.7152, 0.0722));
+        float highTaper = mix(1.0, 0.65, smoothstep(0.65, 1.0, lumLin));
+        float lowTaper = smoothstep(0.01, 0.08, lumLin);
+        vec3 taperedLin = mix(vec3(lumLin), linRGB, lowTaper * highTaper);
+
         mat3 srgbToP3Cinema = mat3(
             0.8544, 0.0272, 0.0140, // Column 0
             0.1456, 0.9728, 0.0594, // Column 1
             0.0000, 0.0000, 0.9266  // Column 2
         );
 
-        vec3 p3Lin = srgbToP3Cinema * linRGB;
+        vec3 p3Lin = srgbToP3Cinema * taperedLin;
         outColor = linearToDisplayGamma(clamp(p3Lin, 0.0, 1.0));
     } else {
         // --- Standard sRGB Calibrated Mode ---
