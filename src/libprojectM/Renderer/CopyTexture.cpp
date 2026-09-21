@@ -111,10 +111,10 @@ const mat3 kOKLabToLMS = mat3(
     0.21580376, -0.06385417, -1.29148554
 );
 
-const mat3 kLMSToLinearP3 = mat3(
-    3.12776915, -1.09101011, -0.02600875,
-    -2.25713598, 2.41333293, -0.50804375,
-    0.12936683, -0.32232282, 1.53405250
+const mat3 kLMSToLinearRGB = mat3(
+    +4.0767416621, -1.2684380046, -0.0041960863, // Column 0
+    -3.3077115913, +2.6097574011, -0.7034186147, // Column 1
+    +0.2309699292, -0.3413193965, +1.7076147010  // Column 2
 );
 
 void main() {
@@ -132,32 +132,19 @@ void main() {
     vec3 outColor;
 
     if (u_wide_gamut_mode == 1) {
-        // --- Display P3 Master Pipeline (OKLCH Perceptual Gamut Extension) ---
+        // --- Perceptual Color Science Pipeline (OKLCH Master) ---
         vec3 linRGB = sRGBToLinear(rgb);
 
-        // 1. Spectral Harmonization (Subpixel Cushioning):
-        // Profile 0 (Natural): 3.5% cushioning -> velvety, organic, dye-transfer density (Wizard of Oz / Back to the Future)
-        // Profile 1 (Vivid):   2.0% cushioning -> maximum punchy vibrancy (Caribbean 4K HDR)
-        // Rows sum to 1.0, preserving neutral D65 white point bit-exactly.
-        float cushion = (u_color_profile == 1) ? 0.020 : 0.035;
-        float diag = 1.0 - 2.0 * cushion;
-        mat3 spectralHarmonize = mat3(
-            diag, cushion, cushion, // Column 0
-            cushion, diag, cushion, // Column 1
-            cushion, cushion, diag  // Column 2
-        );
-        vec3 harmLin = spectralHarmonize * linRGB;
-
-        // 2. Transform to OKLab Perceptual Uniform Color Space:
-        vec3 lms = kLinRGBToLMS * harmLin;
+        // 1. Pure Direct Linear RGB (No cross-channel contamination or tint leakage)
+        vec3 lms = kLinRGBToLMS * linRGB;
         vec3 lms_ = pow(max(lms, vec3(0.0)), vec3(1.0 / 3.0));
         vec3 lab = kLMSToOKLab * lms_;
 
         float L = lab.x;
         float C = length(lab.yz);
 
-        // Highlight Detail Preservation Shoulder (IMAX DMR / Filmic Roll-off):
-        // Softens blinding peak white burn-out, preserving fine waveform, particle, and animation details.
+        // 2. Highlight Detail Preservation Shoulder (IMAX DMR / Filmic Roll-off):
+        // Softens blinding peak white burn-out, revealing subtle animation details and textures.
         if (L > 0.72) {
             float over = L - 0.72;
             float maxOver = 0.28;
@@ -166,51 +153,44 @@ void main() {
             lab.x = L;
         }
 
-        // 3. Dolby Vision-Inspired Cusp Gamut Extension with Hue Angle Locking:
-        // Profile 0 (Natural): Gentle +16% expansion, relaxed, non-fatiguing, wide color breathing
-        // Profile 1 (Vivid):   Punchy +38% expansion into full P3 volume
+        // 3. Symmetrical Perceptual Gamut Extension with Strict Hue Locking:
+        // Profile 0 (Natural): Balanced +15% expansion, relaxed, pure and perfectly neutral across all hues
+        // Profile 1 (Vivid):   Punchy +35% expansion for high-energy visualization
         // Hue angle is 100.0% mathematically locked to prevent any Hue Twisting (Abney effect).
         if (C > 1e-6) {
             float c2 = C * C;
-            float maxBoost = (u_color_profile == 1) ? 0.38 : 0.16;
-            float midPoint = (u_color_profile == 1) ? 0.0049 : 0.0064;
+            float maxBoost = (u_color_profile == 1) ? 0.35 : 0.15;
+            float midPoint = 0.0049; // 0.07^2
             float chromaScale = 1.0 + maxBoost * (c2 / (c2 + midPoint));
 
             // Dolby Specular Hot-Core (Volumetric Cusp Roll-Off):
-            // As luminance approaches peak, chroma smoothly contracts along the cusp envelope,
-            // producing a white-hot incandescence center surrounded by a rich chromatic halo.
-            float rollStart = (u_color_profile == 1) ? 0.82 : 0.78;
+            // Rolls off softly only at top highlights (> 0.85) to produce incandescent centers.
+            float rollStart = (u_color_profile == 1) ? 0.85 : 0.82;
             if (L > rollStart) {
                 float t = (L - rollStart) / (1.0 - rollStart);
-                chromaScale *= (1.0 - t * t * 0.40);
-            }
-
-            // Dolby Clean Shadow Toe: avoids noisy chroma in deep low-light regions
-            if (L < 0.05) {
-                chromaScale *= smoothstep(0.005, 0.05, L);
+                chromaScale *= (1.0 - t * t * 0.30);
             }
 
             lab.yz *= chromaScale;
         }
 
-        // 4. Transform from OKLab to Linear Display P3:
+        // 4. Transform from OKLab to Linear RGB (Canonical Inverse - Zero Bias):
         vec3 lmsBack = kOKLabToLMS * lab;
-        vec3 p3Lin = kLMSToLinearP3 * (lmsBack * lmsBack * lmsBack);
+        vec3 linColor = kLMSToLinearRGB * (lmsBack * lmsBack * lmsBack);
 
         // 5. Cinema Soft-Knee Gamut Compression:
         // Smooth hyperbolic compression as channels approach peak, preventing hard digital clipping.
-        float thresh = (u_color_profile == 1) ? 0.88 : 0.85;
-        vec3 excess = max(p3Lin - vec3(thresh), vec3(0.0));
-        p3Lin = min(p3Lin, vec3(thresh)) + (1.0 - thresh) * (excess / (vec3(1.0) + excess));
+        float thresh = (u_color_profile == 1) ? 0.90 : 0.88;
+        vec3 excess = max(linColor - vec3(thresh), vec3(0.0));
+        linColor = min(linColor, vec3(thresh)) + (1.0 - thresh) * (excess / (vec3(1.0) + excess));
 
         // 6. Dolby Vision Continuous Shadow Toe (C1 Continuity):
-        // Prevents harsh near-black contouring lines while ensuring 100% 0.000 nits on true blacks.
-        // Below L < 0.008, applies smooth hermite roll-off reaching bit-exact 0.0 at L <= 0.0015.
+        // Bit-exact 0.000 nits on true blacks while ensuring smooth continuous emergence.
         float blackToe = smoothstep(0.0015, 0.008, L);
-        p3Lin *= blackToe;
+        linColor *= blackToe;
 
-        // 7. Display P3 Gamma Encode (Gamma 2.2 standard transfer function):
-        outColor = pow(clamp(p3Lin, 0.0, 1.0), vec3(1.0 / 2.2));
+        // 7. Gamma Encode (Standard 2.2 transfer function):
+        outColor = pow(clamp(linColor, 0.0, 1.0), vec3(1.0 / 2.2));
     } else {
         // Standard sRGB Calibrated Mode
         outColor = rgb;
