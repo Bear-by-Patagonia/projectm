@@ -58,6 +58,10 @@ MilkdropShader::MilkdropShader(ShaderType type)
             index++;
         }
     } while (index < sizeof(m_randTranslation) / sizeof(m_randTranslation[0]));
+
+    m_locC.fill(-1);
+    m_locQ.fill(-1);
+    m_locRot.fill(-1);
 }
 
 void MilkdropShader::LoadCode(const std::string& presetShaderCode)
@@ -165,9 +169,6 @@ void MilkdropShader::LoadVariables(const PresetState& presetState, const PerFram
 
     auto floatTime = static_cast<float>(presetState.renderContext.time);
     auto timeSincePresetStartWrapped = floatTime - static_cast<int>(floatTime / 10000.0) * 10000;
-    auto mipX = logf(static_cast<float>(presetState.renderContext.viewportSizeX)) / logf(2.0f);
-    auto mipY = logf(static_cast<float>(presetState.renderContext.viewportSizeY)) / logf(2.0f);
-    auto mipAvg = 0.5f * (mipX + mipY);
 
     BlurTexture::Values blurMin;
     BlurTexture::Values blurMax;
@@ -175,143 +176,193 @@ void MilkdropShader::LoadVariables(const PresetState& presetState, const PerFram
 
     m_shader.Bind();
 
-    m_shader.SetUniformMat4x4("vertex_transformation", PresetState::orthogonalProjection);
+    m_shader.SetUniformMat4x4(m_locVertexTransformation, PresetState::orthogonalProjection);
 
-    m_shader.SetUniformFloat4("rand_frame", {floatRand(),
-                                             floatRand(),
-                                             floatRand(),
-                                             floatRand()});
-    m_shader.SetUniformFloat4("rand_preset", {m_randValues[0],
-                                              m_randValues[1],
-                                              m_randValues[2],
-                                              m_randValues[3]});
-
-    m_shader.SetUniformFloat4("_c0", {presetState.renderContext.aspectX,
-                                      presetState.renderContext.aspectY,
-                                      1.0f / presetState.renderContext.aspectX,
-                                      1.0f / presetState.renderContext.aspectY});
-    m_shader.SetUniformFloat4("_c1", {(m_type == ShaderType::CompositeShader && s_hdrPeakModeEnabled) ? 1.0f : 0.0f,
-                                      0.0f,
-                                      0.0f,
-                                      0.0f});
-    m_shader.SetUniformFloat4("_c2", {timeSincePresetStartWrapped,
-                                      presetState.renderContext.fps,
-                                      presetState.renderContext.frame,
-                                      presetState.renderContext.progress});
-    m_shader.SetUniformFloat4("_c3", {presetState.audioData.bass,
-                                      presetState.audioData.mid,
-                                      presetState.audioData.treb,
-                                      presetState.audioData.vol});
-    m_shader.SetUniformFloat4("_c4", {presetState.audioData.bassAtt,
-                                      presetState.audioData.midAtt,
-                                      presetState.audioData.trebAtt,
-                                      presetState.audioData.volAtt});
-    m_shader.SetUniformFloat4("_c5", {blurMax[0] - blurMin[0],
-                                      blurMin[0],
-                                      blurMax[1] - blurMin[1],
-                                      blurMin[1]});
-    m_shader.SetUniformFloat4("_c6", {blurMax[2] - blurMin[2],
-                                      blurMin[2],
-                                      blurMin[0],
-                                      blurMax[0]});
-    m_shader.SetUniformFloat4("_c7", {presetState.renderContext.viewportSizeX,
-                                      presetState.renderContext.viewportSizeY,
-                                      1.0f / static_cast<float>(presetState.renderContext.viewportSizeX),
-                                      1.0f / static_cast<float>(presetState.renderContext.viewportSizeY)});
-
-    m_shader.SetUniformFloat4("_c8", {0.5f + 0.5f * cosf(floatTime * 0.329f + 1.2f),
-                                      0.5f + 0.5f * cosf(floatTime * 1.293f + 3.9f),
-                                      0.5f + 0.5f * cosf(floatTime * 5.070f + 2.5f),
-                                      0.5f + 0.5f * cosf(floatTime * 20.051f + 5.4f)});
-
-    m_shader.SetUniformFloat4("_c9", {0.5f + 0.5f * sinf(floatTime * 0.329f + 1.2f),
-                                      0.5f + 0.5f * sinf(floatTime * 1.293f + 3.9f),
-                                      0.5f + 0.5f * sinf(floatTime * 5.070f + 2.5f),
-                                      0.5f + 0.5f * sinf(floatTime * 20.051f + 5.4f)});
-
-    m_shader.SetUniformFloat4("_c10", {0.5f + 0.5f * cosf(floatTime * 0.0050f + 2.7f),
-                                       0.5f + 0.5f * cosf(floatTime * 0.0085f + 5.3f),
-                                       0.5f + 0.5f * cosf(floatTime * 0.0133f + 4.5f),
-                                       0.5f + 0.5f * cosf(floatTime * 0.0217f + 3.8f)});
-
-    m_shader.SetUniformFloat4("_c11", {0.5f + 0.5f * sinf(floatTime * 0.0050f + 2.7f),
-                                       0.5f + 0.5f * sinf(floatTime * 0.0085f + 5.3f),
-                                       0.5f + 0.5f * sinf(floatTime * 0.0133f + 4.5f),
-                                       0.5f + 0.5f * sinf(floatTime * 0.0217f + 3.8f)});
-
-    m_shader.SetUniformFloat4("_c12", {mipX,
-                                       mipY,
-                                       mipAvg,
-                                       0});
-    m_shader.SetUniformFloat4("_c13", {blurMin[1],
-                                       blurMax[1],
-                                       blurMin[2],
-                                       blurMax[2]});
-
-
-    std::array<glm::mat4, 24> tempMatrices{};
-
-    // write matrices
-    for (int i = 0; i < 20; i++)
+    if (m_locRandFrame >= 0)
     {
-        glm::mat4 const rotationX = glm::rotate(glm::mat4(1.0f), m_randRotationCenters[i].x + m_randRotationSpeeds[i].x * floatTime, glm::vec3(1.0f, 0.0f, 0.0f));
-        glm::mat4 const rotationY = glm::rotate(glm::mat4(1.0f), m_randRotationCenters[i].y + m_randRotationSpeeds[i].y * floatTime, glm::vec3(0.0f, 1.0f, 0.0f));
-        glm::mat4 const rotationZ = glm::rotate(glm::mat4(1.0f), m_randRotationCenters[i].z + m_randRotationSpeeds[i].z * floatTime, glm::vec3(0.0f, 0.0f, 1.0f));
-
-        glm::mat4 const randomTranslation = glm::translate(glm::mat4(1.0f), glm::vec3(m_randTranslation[i].x, m_randTranslation[i].y, m_randTranslation[i].z));
-
-        tempMatrices[i] = randomTranslation * rotationX;
-        tempMatrices[i] = rotationZ * tempMatrices[i];
-        tempMatrices[i] = rotationY * tempMatrices[i];
+        float const randFrame[4] = {floatRand(), floatRand(), floatRand(), floatRand()};
+        m_shader.SetUniformFloat4(m_locRandFrame, randFrame);
+    }
+    if (m_locRandPreset >= 0)
+    {
+        m_shader.SetUniformFloat4(m_locRandPreset, m_randValues.data());
     }
 
-    // the last 4 are totally random, each frame
-    for (int i = 20; i < 24; i++)
+    if (m_locC[0] >= 0)
     {
-        glm::mat4 const rotationX = glm::rotate(glm::mat4(1.0f), floatRand() * 6.28f, glm::vec3(1.0f, 0.0f, 0.0f));
-        glm::mat4 const rotationY = glm::rotate(glm::mat4(1.0f), floatRand() * 6.28f, glm::vec3(0.0f, 1.0f, 0.0f));
-        glm::mat4 const rotationZ = glm::rotate(glm::mat4(1.0f), floatRand() * 6.28f, glm::vec3(0.0f, 0.0f, 1.0f));
-
-        glm::mat4 const randomTranslation = glm::translate(glm::mat4(1.0f), glm::vec3(floatRand(), floatRand(), floatRand()));
-
-        tempMatrices[i] = randomTranslation * rotationX;
-        tempMatrices[i] = rotationZ * tempMatrices[i];
-        tempMatrices[i] = rotationY * tempMatrices[i];
+        float const c0[4] = {presetState.renderContext.aspectX,
+                             presetState.renderContext.aspectY,
+                             1.0f / presetState.renderContext.aspectX,
+                             1.0f / presetState.renderContext.aspectY};
+        m_shader.SetUniformFloat4(m_locC[0], c0);
+    }
+    if (m_locC[1] >= 0)
+    {
+        float const c1[4] = {(m_type == ShaderType::CompositeShader && s_hdrPeakModeEnabled) ? 1.0f : 0.0f,
+                             0.0f,
+                             0.0f,
+                             0.0f};
+        m_shader.SetUniformFloat4(m_locC[1], c1);
+    }
+    if (m_locC[2] >= 0)
+    {
+        float const c2[4] = {timeSincePresetStartWrapped,
+                             presetState.renderContext.fps,
+                             static_cast<float>(presetState.renderContext.frame),
+                             presetState.renderContext.progress};
+        m_shader.SetUniformFloat4(m_locC[2], c2);
+    }
+    if (m_locC[3] >= 0)
+    {
+        float const c3[4] = {presetState.audioData.bass,
+                             presetState.audioData.mid,
+                             presetState.audioData.treb,
+                             presetState.audioData.vol};
+        m_shader.SetUniformFloat4(m_locC[3], c3);
+    }
+    if (m_locC[4] >= 0)
+    {
+        float const c4[4] = {presetState.audioData.bassAtt,
+                             presetState.audioData.midAtt,
+                             presetState.audioData.trebAtt,
+                             presetState.audioData.volAtt};
+        m_shader.SetUniformFloat4(m_locC[4], c4);
+    }
+    if (m_locC[5] >= 0)
+    {
+        float const c5[4] = {blurMax[0] - blurMin[0],
+                             blurMin[0],
+                             blurMax[1] - blurMin[1],
+                             blurMin[1]};
+        m_shader.SetUniformFloat4(m_locC[5], c5);
+    }
+    if (m_locC[6] >= 0)
+    {
+        float const c6[4] = {blurMax[2] - blurMin[2],
+                             blurMin[2],
+                             blurMin[0],
+                             blurMax[0]};
+        m_shader.SetUniformFloat4(m_locC[6], c6);
+    }
+    if (m_locC[7] >= 0)
+    {
+        float const c7[4] = {static_cast<float>(presetState.renderContext.viewportSizeX),
+                             static_cast<float>(presetState.renderContext.viewportSizeY),
+                             1.0f / static_cast<float>(presetState.renderContext.viewportSizeX),
+                             1.0f / static_cast<float>(presetState.renderContext.viewportSizeY)};
+        m_shader.SetUniformFloat4(m_locC[7], c7);
     }
 
-    m_shader.SetUniformMat3x4("rot_s1", tempMatrices[0]);
-    m_shader.SetUniformMat3x4("rot_s2", tempMatrices[1]);
-    m_shader.SetUniformMat3x4("rot_s3", tempMatrices[2]);
-    m_shader.SetUniformMat3x4("rot_s4", tempMatrices[3]);
-    m_shader.SetUniformMat3x4("rot_d1", tempMatrices[4]);
-    m_shader.SetUniformMat3x4("rot_d2", tempMatrices[5]);
-    m_shader.SetUniformMat3x4("rot_d3", tempMatrices[6]);
-    m_shader.SetUniformMat3x4("rot_d4", tempMatrices[7]);
-    m_shader.SetUniformMat3x4("rot_f1", tempMatrices[8]);
-    m_shader.SetUniformMat3x4("rot_f2", tempMatrices[9]);
-    m_shader.SetUniformMat3x4("rot_f3", tempMatrices[10]);
-    m_shader.SetUniformMat3x4("rot_f4", tempMatrices[11]);
-    m_shader.SetUniformMat3x4("rot_vf1", tempMatrices[12]);
-    m_shader.SetUniformMat3x4("rot_vf2", tempMatrices[13]);
-    m_shader.SetUniformMat3x4("rot_vf3", tempMatrices[14]);
-    m_shader.SetUniformMat3x4("rot_vf4", tempMatrices[15]);
-    m_shader.SetUniformMat3x4("rot_uf1", tempMatrices[16]);
-    m_shader.SetUniformMat3x4("rot_uf2", tempMatrices[17]);
-    m_shader.SetUniformMat3x4("rot_uf3", tempMatrices[18]);
-    m_shader.SetUniformMat3x4("rot_uf4", tempMatrices[19]);
-    m_shader.SetUniformMat3x4("rot_rand1", tempMatrices[20]);
-    m_shader.SetUniformMat3x4("rot_rand2", tempMatrices[21]);
-    m_shader.SetUniformMat3x4("rot_rand3", tempMatrices[22]);
-    m_shader.SetUniformMat3x4("rot_rand4", tempMatrices[23]);
-
-    // set program uniform "_q[a-h]" values (_qa.x, _qa.y, _qa.z, _qa.w, _qb.x, _qb.y ... ) alias q[1-32]
-    static const char* const s_qVarNames[8] = {"_qa", "_qb", "_qc", "_qd", "_qe", "_qf", "_qg", "_qh"};
-    for (int i = 0; i < QVarCount; i += 4)
+    if (m_hasFastTrigUniforms)
     {
-        m_shader.SetUniformFloat4(s_qVarNames[i / 4], {presetState.frameQVariables[i],
-                                                       presetState.frameQVariables[i + 1],
-                                                       presetState.frameQVariables[i + 2],
-                                                       presetState.frameQVariables[i + 3]});
+        if (m_locC[8] >= 0)
+        {
+            float const c8[4] = {0.5f + 0.5f * cosf(floatTime * 0.329f + 1.2f),
+                                 0.5f + 0.5f * cosf(floatTime * 1.293f + 3.9f),
+                                 0.5f + 0.5f * cosf(floatTime * 5.070f + 2.5f),
+                                 0.5f + 0.5f * cosf(floatTime * 20.051f + 5.4f)};
+            m_shader.SetUniformFloat4(m_locC[8], c8);
+        }
+        if (m_locC[9] >= 0)
+        {
+            float const c9[4] = {0.5f + 0.5f * sinf(floatTime * 0.329f + 1.2f),
+                                 0.5f + 0.5f * sinf(floatTime * 1.293f + 3.9f),
+                                 0.5f + 0.5f * sinf(floatTime * 5.070f + 2.5f),
+                                 0.5f + 0.5f * sinf(floatTime * 20.051f + 5.4f)};
+            m_shader.SetUniformFloat4(m_locC[9], c9);
+        }
+    }
+
+    if (m_hasSlowTrigUniforms)
+    {
+        if (m_locC[10] >= 0)
+        {
+            float const c10[4] = {0.5f + 0.5f * cosf(floatTime * 0.0050f + 2.7f),
+                                  0.5f + 0.5f * cosf(floatTime * 0.0085f + 5.3f),
+                                  0.5f + 0.5f * cosf(floatTime * 0.0133f + 4.5f),
+                                  0.5f + 0.5f * cosf(floatTime * 0.0217f + 3.8f)};
+            m_shader.SetUniformFloat4(m_locC[10], c10);
+        }
+        if (m_locC[11] >= 0)
+        {
+            float const c11[4] = {0.5f + 0.5f * sinf(floatTime * 0.0050f + 2.7f),
+                                  0.5f + 0.5f * sinf(floatTime * 0.0085f + 5.3f),
+                                  0.5f + 0.5f * sinf(floatTime * 0.0133f + 4.5f),
+                                  0.5f + 0.5f * sinf(floatTime * 0.0217f + 3.8f)};
+            m_shader.SetUniformFloat4(m_locC[11], c11);
+        }
+    }
+
+    if (m_locC[12] >= 0)
+    {
+        auto mipX = logf(static_cast<float>(presetState.renderContext.viewportSizeX)) / logf(2.0f);
+        auto mipY = logf(static_cast<float>(presetState.renderContext.viewportSizeY)) / logf(2.0f);
+        auto mipAvg = 0.5f * (mipX + mipY);
+        float const c12[4] = {mipX, mipY, mipAvg, 0.0f};
+        m_shader.SetUniformFloat4(m_locC[12], c12);
+    }
+    if (m_locC[13] >= 0)
+    {
+        float const c13[4] = {blurMin[1], blurMax[1], blurMin[2], blurMax[2]};
+        m_shader.SetUniformFloat4(m_locC[13], c13);
+    }
+
+    // Lazy 3D Rotations: ONLY compute if preset shader actually references any rot_* uniform
+    if (m_has3DRotationUniforms)
+    {
+        std::array<glm::mat4, 24> tempMatrices{};
+
+        // write matrices
+        for (int i = 0; i < 20; i++)
+        {
+            glm::mat4 const rotationX = glm::rotate(glm::mat4(1.0f), m_randRotationCenters[i].x + m_randRotationSpeeds[i].x * floatTime, glm::vec3(1.0f, 0.0f, 0.0f));
+            glm::mat4 const rotationY = glm::rotate(glm::mat4(1.0f), m_randRotationCenters[i].y + m_randRotationSpeeds[i].y * floatTime, glm::vec3(0.0f, 1.0f, 0.0f));
+            glm::mat4 const rotationZ = glm::rotate(glm::mat4(1.0f), m_randRotationCenters[i].z + m_randRotationSpeeds[i].z * floatTime, glm::vec3(0.0f, 0.0f, 1.0f));
+
+            glm::mat4 const randomTranslation = glm::translate(glm::mat4(1.0f), glm::vec3(m_randTranslation[i].x, m_randTranslation[i].y, m_randTranslation[i].z));
+
+            tempMatrices[i] = randomTranslation * rotationX;
+            tempMatrices[i] = rotationZ * tempMatrices[i];
+            tempMatrices[i] = rotationY * tempMatrices[i];
+        }
+
+        // the last 4 are totally random, each frame
+        for (int i = 20; i < 24; i++)
+        {
+            glm::mat4 const rotationX = glm::rotate(glm::mat4(1.0f), floatRand() * 6.28f, glm::vec3(1.0f, 0.0f, 0.0f));
+            glm::mat4 const rotationY = glm::rotate(glm::mat4(1.0f), floatRand() * 6.28f, glm::vec3(0.0f, 1.0f, 0.0f));
+            glm::mat4 const rotationZ = glm::rotate(glm::mat4(1.0f), floatRand() * 6.28f, glm::vec3(0.0f, 0.0f, 1.0f));
+
+            glm::mat4 const randomTranslation = glm::translate(glm::mat4(1.0f), glm::vec3(floatRand(), floatRand(), floatRand()));
+
+            tempMatrices[i] = randomTranslation * rotationX;
+            tempMatrices[i] = rotationZ * tempMatrices[i];
+            tempMatrices[i] = rotationY * tempMatrices[i];
+        }
+
+        for (size_t i = 0; i < 24; ++i)
+        {
+            if (m_locRot[i] >= 0)
+            {
+                m_shader.SetUniformMat3x4(m_locRot[i], tempMatrices[i]);
+            }
+        }
+    }
+
+    // Set program uniform "_q[a-h]" values alias q[1-32] directly by cached location
+    for (size_t i = 0; i < 8; ++i)
+    {
+        if (m_locQ[i] >= 0)
+        {
+            size_t const qIdx = i * 4;
+            float const qVals[4] = {
+                static_cast<float>(presetState.frameQVariables[qIdx]),
+                static_cast<float>(presetState.frameQVariables[qIdx + 1]),
+                static_cast<float>(presetState.frameQVariables[qIdx + 2]),
+                static_cast<float>(presetState.frameQVariables[qIdx + 3])
+            };
+            m_shader.SetUniformFloat4(m_locQ[i], qVals);
+        }
     }
 
     // Bind all texture and sampler descriptors. This includes the main and blur textures.
@@ -754,6 +805,52 @@ void MilkdropShader::TranspileHLSLShader(const PresetState& presetState, std::st
     else
     {
         m_shader.CompileProgram(MilkdropStaticShaders::Get()->GetPresetCompVertexShader(), generator.GetResult());
+    }
+
+    CacheUniformLocations();
+}
+
+void MilkdropShader::CacheUniformLocations()
+{
+    m_locVertexTransformation = m_shader.GetUniformLocation("vertex_transformation");
+    m_locRandFrame = m_shader.GetUniformLocation("rand_frame");
+    m_locRandPreset = m_shader.GetUniformLocation("rand_preset");
+
+    static const char* const s_cVarNames[14] = {
+        "_c0", "_c1", "_c2", "_c3", "_c4", "_c5", "_c6",
+        "_c7", "_c8", "_c9", "_c10", "_c11", "_c12", "_c13"
+    };
+    for (size_t i = 0; i < 14; ++i)
+    {
+        m_locC[i] = m_shader.GetUniformLocation(s_cVarNames[i]);
+    }
+    m_hasFastTrigUniforms = (m_locC[8] >= 0 || m_locC[9] >= 0);
+    m_hasSlowTrigUniforms = (m_locC[10] >= 0 || m_locC[11] >= 0);
+
+    static const char* const s_qVarNames[8] = {
+        "_qa", "_qb", "_qc", "_qd", "_qe", "_qf", "_qg", "_qh"
+    };
+    for (size_t i = 0; i < 8; ++i)
+    {
+        m_locQ[i] = m_shader.GetUniformLocation(s_qVarNames[i]);
+    }
+
+    static const char* const s_rotVarNames[24] = {
+        "rot_s1", "rot_s2", "rot_s3", "rot_s4",
+        "rot_d1", "rot_d2", "rot_d3", "rot_d4",
+        "rot_f1", "rot_f2", "rot_f3", "rot_f4",
+        "rot_vf1", "rot_vf2", "rot_vf3", "rot_vf4",
+        "rot_uf1", "rot_uf2", "rot_uf3", "rot_uf4",
+        "rot_rand1", "rot_rand2", "rot_rand3", "rot_rand4"
+    };
+    m_has3DRotationUniforms = false;
+    for (size_t i = 0; i < 24; ++i)
+    {
+        m_locRot[i] = m_shader.GetUniformLocation(s_rotVarNames[i]);
+        if (m_locRot[i] >= 0)
+        {
+            m_has3DRotationUniforms = true;
+        }
     }
 }
 

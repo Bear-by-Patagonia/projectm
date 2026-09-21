@@ -146,12 +146,27 @@ public:
     void SetUniformInt3(const char* uniform, const glm::ivec3& values) const;
 
     /**
+     * @brief Gets uniform location from cache or shader program.
+     * @param uniform The uniform name.
+     * @return The OpenGL uniform location, or -1 if not found.
+     */
+    GLint GetUniformLocation(const char* uniform) const;
+
+    /**
      * @brief Sets a float vec4 uniform.
      * The program must be bound before calling this method!
      * @param uniform The uniform name
      * @param values The values to set.
      */
     void SetUniformFloat4(const char* uniform, const glm::vec4& values) const;
+
+    /**
+     * @brief Sets a float vec4 uniform by cached location.
+     * The program must be bound before calling this method!
+     * @param location The uniform location.
+     * @param values Pointer to 4 contiguous floats.
+     */
+    void SetUniformFloat4(GLint location, const float* values) const;
 
     /**
      * @brief Sets an int vec4 uniform.
@@ -170,12 +185,28 @@ public:
     void SetUniformMat3x4(const char* uniform, const glm::mat3x4& values) const;
 
     /**
+     * @brief Sets a float 3x4 matrix uniform by cached location.
+     * The program must be bound before calling this method!
+     * @param location The uniform location.
+     * @param values The matrix to set.
+     */
+    void SetUniformMat3x4(GLint location, const glm::mat3x4& values) const;
+
+    /**
      * @brief Sets a float 4x4 matrix uniform.
      * The program must be bound before calling this method!
      * @param uniform The uniform name
      * @param values The matrix to set.
      */
     void SetUniformMat4x4(const char* uniform, const glm::mat4x4& values) const;
+
+    /**
+     * @brief Sets a float 4x4 matrix uniform by cached location.
+     * The program must be bound before calling this method!
+     * @param location The uniform location.
+     * @param values The matrix to set.
+     */
+    void SetUniformMat4x4(GLint location, const glm::mat4x4& values) const;
 
     /**
      * @brief Parses the shading language version string returned from OpenGL.

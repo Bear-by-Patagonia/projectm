@@ -104,6 +104,11 @@ private:
      */
     void UpdateMaxBlurLevel(BlurTexture::BlurLevel requestedLevel);
 
+    /**
+     * @brief Pre-caches uniform locations after shader compilation to eliminate per-frame map lookups and driver overhead.
+     */
+    void CacheUniformLocations();
+
     ShaderType m_type{ShaderType::WarpShader}; //!< Type of this shader.
     std::string m_fragmentShaderCode;          //!< The original preset fragment shader code.
     std::string m_preprocessedCode;            //!< The preprocessed preset shader code.
@@ -119,6 +124,17 @@ private:
     std::array<glm::vec3, 20> m_randRotationSpeeds{};  //!< Random rotation speeds which don't change every frame.
 
     Renderer::Shader m_shader;
+
+    // Fast cached uniform locations
+    GLint m_locVertexTransformation{-1};
+    GLint m_locRandFrame{-1};
+    GLint m_locRandPreset{-1};
+    std::array<GLint, 14> m_locC{};
+    std::array<GLint, 8> m_locQ{};
+    std::array<GLint, 24> m_locRot{};
+    bool m_has3DRotationUniforms{false};
+    bool m_hasFastTrigUniforms{false}; // _c8, _c9
+    bool m_hasSlowTrigUniforms{false}; // _c10, _c11
 };
 
 } // namespace MilkdropPreset
