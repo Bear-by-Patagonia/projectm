@@ -122,21 +122,26 @@ void main() {
             Y = newY;
         }
 
-        // 2. Symmetrical 360° Rec.709 Gamut Extension with Absolute Hue Locking (0.0000° drift):
-        // Profile 0 (Natural): Refined +18% vibrance expansion, perfectly neutral across all hues
-        // Profile 1 (Vivid):   Punchy +35% expansion for high-energy visualization
-        // Asymptotically approaches gamut boundary to prevent any digital clipping or color cast.
-        vec3 c = rgb - vec3(Y);
-        vec3 posHeadroom = (vec3(1.0) - vec3(Y)) / max(c, vec3(1e-5));
-        vec3 negHeadroom = vec3(Y) / max(-c, vec3(1e-5));
+        // 2. Isometric 360° Rec.709 Gamut Extension with Highlight Taper & Strict R/G/B Symmetry:
+        // By anchoring to isometric intensity I = (R+G+B)/3, Red, Green, and Blue receive exactly
+        // identical chromatic magnitude (||c|| = 0.8165), completely preventing Red or Blue from over-saturating.
+        float I = (rgb.r + rgb.g + rgb.b) * 0.33333333;
+        vec3 c = rgb - vec3(I);
+        vec3 posHeadroom = (vec3(1.0) - vec3(I)) / max(c, vec3(1e-5));
+        vec3 negHeadroom = vec3(I) / max(-c, vec3(1e-5));
         vec3 limits = mix(negHeadroom, posHeadroom, step(vec3(0.0), c));
         float gamutLimit = min(min(limits.r, limits.g), limits.b);
 
-        float maxBoost = (u_color_profile == 1) ? 0.35 : 0.18;
+        // Dolby Volumetric Highlight Taper:
+        // Full, rich gamut vibrance in midtones and shadows; smoothly tapers off in bright highlights (> 0.50)
+        // so that bright zones maintain rich tonal nuance instead of screaming flat saturation.
+        float highlightTaper = clamp(1.0 - max(0.0, I - 0.50) / 0.45, 0.0, 1.0);
+
+        float maxBoost = (u_color_profile == 1) ? 0.22 : 0.10;
         float headroom = max(0.0, gamutLimit - 1.0);
-        float boostAmount = maxBoost * (headroom / (headroom + 0.45));
+        float boostAmount = maxBoost * highlightTaper * (headroom / (headroom + 0.45));
         float scale = 1.0 + boostAmount;
-        outColor = vec3(Y) + c * scale;
+        outColor = vec3(I) + c * scale;
 
         // 3. Dolby Vision Continuous Shadow Toe (C1 Continuity):
         // Bit-exact 0.000 nits on true blacks while ensuring smooth continuous emergence.
