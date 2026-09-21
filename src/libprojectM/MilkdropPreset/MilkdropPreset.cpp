@@ -138,10 +138,8 @@ void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audio
     }
     m_waveform.Draw(m_perFrameContext);
 
-    // Done in DrawSprites() in Milkdrop
-    // If the preset explicitly enables darken_center, or if it is a classic preset without
-    // a custom warp shader (preventing center singularity accumulation), softly dissipate center energy.
-    if (*m_perFrameContext.darken_center > 0 || m_state.warpShader.empty())
+    // Done in DrawSprites() in Milkdrop (strictly adhere to original MilkDrop logic)
+    if (*m_perFrameContext.darken_center > 0)
     {
         m_darkenCenter.Draw();
     }
@@ -155,9 +153,9 @@ void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audio
     m_framebuffer.BindRead(m_currentFrameBuffer);
     m_framebuffer.BindDraw(m_previousFrameBuffer);
 
-    // Invalidate stale content in destination framebuffer before drawing final composite
-    const GLenum drawDiscards[] = { GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT };
-    glInvalidateFramebuffer(GL_DRAW_FRAMEBUFFER, 3, drawDiscards);
+    // Invalidate stale depth/stencil content in destination framebuffer before drawing final composite
+    const GLenum drawDiscards[] = { GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT };
+    glInvalidateFramebuffer(GL_DRAW_FRAMEBUFFER, 2, drawDiscards);
 
     m_finalComposite.Draw(m_state, m_perFrameContext);
 

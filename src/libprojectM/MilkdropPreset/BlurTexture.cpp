@@ -261,18 +261,14 @@ void BlurTexture::Update(const Renderer::Texture& sourceTexture, const PerFrameC
         m_blurTextures[pass]->Bind(0);
         glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, m_blurTextures[pass]->Width(), m_blurTextures[pass]->Height());
         m_blurTextures[pass]->Unbind(0);
-
-        // Invalidate scratch framebuffer attachment now that texture is copied
-        const GLenum passDiscard = GL_COLOR_ATTACHMENT0;
-        glInvalidateFramebuffer(GL_FRAMEBUFFER, 1, &passDiscard);
     }
 
     Renderer::Mesh::Unbind();
     Renderer::BlendMode::Set(false, Renderer::BlendMode::Function::SourceAlpha, Renderer::BlendMode::Function::OneMinusSourceAlpha);
 
-    // Invalidate complete blur scratch framebuffer before restoring original bindings
-    const GLenum blurDiscards[] = { GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT };
-    glInvalidateFramebuffer(GL_FRAMEBUFFER, 3, blurDiscards);
+    // Invalidate depth/stencil on blur scratch framebuffer before restoring original bindings
+    const GLenum blurDiscards[] = { GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT };
+    glInvalidateFramebuffer(GL_FRAMEBUFFER, 2, blurDiscards);
 
     // Bind previous framebuffer and reset viewport size
     glBindFramebuffer(GL_READ_FRAMEBUFFER, origReadFramebuffer);
