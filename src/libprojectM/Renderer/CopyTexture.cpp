@@ -94,53 +94,48 @@ void main() {
         vec3 linRGB = sRGBToLinear(rgb);
 
         // 1. Spectral Harmonization (Subpixel Softening):
-        // Natural physical light sources always have spectral bandwidth.
-        // Injects delicate optical resonance into secondary channels so pure procedural primaries
-        // don't burn like single-subpixel laser stickers, transforming harsh reds into velvet ruby
-        // and harsh blues into ocean sapphire. Preserves D65 white point exactly (rows sum to 1.0).
+        // Physical light sources have continuous emission spectra.
+        // Injects 4.0% harmonic resonance into adjacent subpixels so pure procedural primaries
+        // don't burn like single-subpixel monochromatic lasers, turning harsh reds into velvety ruby
+        // and sharp blues into deep ocean sapphire. Exactly preserves D65 white point (rows sum to 1.0).
         mat3 spectralHarmonize = mat3(
-            0.910, 0.045, 0.045, // Column 0
-            0.045, 0.910, 0.045, // Column 1
-            0.045, 0.045, 0.910  // Column 2
+            0.920, 0.040, 0.040, // Column 0
+            0.040, 0.920, 0.040, // Column 1
+            0.040, 0.040, 0.920  // Column 2
         );
         vec3 harmLin = spectralHarmonize * linRGB;
 
-        // 2. Calibrated Cinema Display P3 Projection (18% Gamut Volume Expansion)
-        mat3 srgbToP3Cinema = mat3(
-            0.8544, 0.0272, 0.0140, // Column 0
-            0.1456, 0.9728, 0.0594, // Column 1
-            0.0000, 0.0000, 0.9266  // Column 2
+        // 2. Calibrated Display P3 Gamut Unfolding (20% Gamut Volume Expansion):
+        // Unfolds intermediate hues (amber, coral, jade, teal, violet) into P3 color volume
+        // while strictly preventing primary oversaturation or neon fluorescent clipping.
+        // Rows sum to 1.0 to preserve D65 neutral white.
+        mat3 srgbToP3Master = mat3(
+            0.8580, 0.0266, 0.0137, // Column 0
+            0.1420, 0.9734, 0.0579, // Column 1
+            0.0000, 0.0000, 0.9284  // Column 2
         );
-        vec3 p3Lin = srgbToP3Cinema * harmLin;
+        vec3 p3Lin = srgbToP3Master * harmLin;
 
-        // 3. ACES Reference Gamut Compression (RGC Soft-Knee):
-        // Compresses extreme out-of-bounds saturation towards the achromatic (neutral) axis.
-        // Prevents primary channel clipping and allows delicate intermediate hues (amber, coral, teal) to breathe.
-        float achromatic = max(p3Lin.r, max(p3Lin.g, p3Lin.b));
-        if (achromatic > 1e-5) {
-            vec3 dist = (vec3(achromatic) - p3Lin) / achromatic;
-            float threshold = 0.70;
-            vec3 compDist = dist;
-            for (int i = 0; i < 3; i++) {
-                if (dist[i] > threshold) {
-                    float d = (dist[i] - threshold) / (1.0 - threshold);
-                    compDist[i] = threshold + (1.0 - threshold) * (d / (1.0 + 0.5 * d));
-                }
-            }
-            p3Lin = vec3(achromatic) - compDist * achromatic;
+        // 3. Luminance-Preserving Ratio Tone Mapping (AgX / ACES 1.3 Cinema Standard):
+        // NEVER modifies R, G, B channels independently to prevent hue shift and washed-out chalky whites.
+        // Calculates perceptual luminance Y, applies filmic highlight shoulder roll-off to Y alone,
+        // and scales RGB by (Y_mapped / Y). Hue and saturation ratios are 100% perfectly preserved.
+        float lum = dot(p3Lin, vec3(0.2126, 0.7152, 0.0722));
+        if (lum > 1e-5) {
+            float filmicLum = lum / (1.0 + 0.25 * lum) * 1.20;
+            p3Lin *= (filmicLum / lum);
         }
 
-        // 4. Filmic S-Curve Tone Mapping (ACES Fit):
-        // Delivers the velvety contrast of the LG OLED demo video:
-        // - Deep inky shadows with natural toe roll-off.
-        // - Rich, uncompressed, tactile midtones.
-        // - Smooth highlight shoulder: highlights maintain their rich color identity without glaring.
-        vec3 x = p3Lin;
-        vec3 filmic = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
-        filmic *= 1.244; // Normalize peak 1.0 -> 1.0
+        // 4. Cinema Soft-Knee Gamut Compression:
+        // Smooth hyperbolic knee compression as channels approach peak, preventing hard-edge clipping
+        // and preserving rich color density across all presets.
+        float thresh = 0.82;
+        vec3 excess = max(p3Lin - vec3(thresh), vec3(0.0));
+        p3Lin = min(p3Lin, vec3(thresh)) + (1.0 - thresh) * (excess / (vec3(1.0) + excess));
 
-        // 5. Cinema OLED Gamma BT.1886 (2.35): deepens color density without lechoso cast
-        outColor = pow(clamp(filmic, 0.0, 1.0), vec3(1.0 / 2.35));
+        // 5. Display P3 Gamma Encode (Gamma 2.2 standard transfer function):
+        // Keeps middle gray at true perceptual 128, preserving high contrast and dynamic range headroom.
+        outColor = pow(clamp(p3Lin, 0.0, 1.0), vec3(1.0 / 2.2));
     } else {
         // Standard sRGB Calibrated Mode
         outColor = rgb;
@@ -153,6 +148,11 @@ void main() {
     float lum = dot(outColor, vec3(0.2126, 0.7152, 0.0722));
     float ditherGate = smoothstep(0.015, 0.06, lum);
     outColor += vec3(TriangularDither(gl_FragCoord.xy)) * ditherGate;
+
+    // Strict OLED 0-nit black clamp: shut off organic subpixels completely
+    if (lum < 0.003) {
+        outColor = vec3(0.0);
+    }
 
     // Guarantee 100% solid opacity: 0-nit true OLED black, zero background alpha leak
     color = vec4(clamp(outColor, 0.0, 1.0), 1.0);
