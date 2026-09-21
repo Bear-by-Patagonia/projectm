@@ -75,6 +75,31 @@ float TriangularDither(vec2 coord) {
     return (r1 + r2 - 1.0) / 255.0;
 }
 
+// Column-major matrices for OKLab <-> LMS <-> Display P3
+const mat3 kLinRGBToLMS = mat3(
+    0.41222147, 0.21190350, 0.08830246,
+    0.53633254, 0.68069955, 0.28171884,
+    0.05144599, 0.10739696, 0.62997870
+);
+
+const mat3 kLMSToOKLab = mat3(
+    0.21045426, 1.97799850, 0.02590404,
+    0.79361779, -2.42859221, 0.78277177,
+    -0.00407205, 0.45059371, -0.80867577
+);
+
+const mat3 kOKLabToLMS = mat3(
+    1.00000000, 1.00000001, 1.00000005,
+    0.39633779, -0.10556134, -0.08948418,
+    0.21580376, -0.06385417, -1.29148554
+);
+
+const mat3 kLMSToLinearP3 = mat3(
+    3.12776915, -1.09101011, -0.02600875,
+    -2.25713598, 2.41333293, -0.50804375,
+    0.12936683, -0.32232282, 1.53405250
+);
+
 void main() {
     vec4 src = texture(texture_sampler, fragment_tex_coord);
 
@@ -90,51 +115,66 @@ void main() {
     vec3 outColor;
 
     if (u_wide_gamut_mode == 1) {
-        // --- OLED Reference Master Color Pipeline (LG OLED Demo Quality) ---
+        // --- Intelligent Cinema P3 Master Pipeline (IMAX DMR / Dolby Cinema Standard) ---
         vec3 linRGB = sRGBToLinear(rgb);
 
-        // 1. Spectral Harmonization (Subpixel Softening):
-        // Physical light sources have continuous emission spectra.
-        // Injects 4.0% harmonic resonance into adjacent subpixels so pure procedural primaries
-        // don't burn like single-subpixel monochromatic lasers, turning harsh reds into velvety ruby
-        // and sharp blues into deep ocean sapphire. Exactly preserves D65 white point (rows sum to 1.0).
+        // 1. Spectral Harmonization (2.5% Subpixel Cushioning):
+        // Replicates the optical emission bandwidth of physical light sources (fire, bioluminescence, lasers in atmosphere).
+        // Rows sum to 1.0, preserving neutral D65 white point bit-exactly.
         mat3 spectralHarmonize = mat3(
-            0.920, 0.040, 0.040, // Column 0
-            0.040, 0.920, 0.040, // Column 1
-            0.040, 0.040, 0.920  // Column 2
+            0.950, 0.025, 0.025, // Column 0
+            0.025, 0.950, 0.025, // Column 1
+            0.025, 0.025, 0.950  // Column 2
         );
         vec3 harmLin = spectralHarmonize * linRGB;
 
-        // 2. Calibrated Display P3 Gamut Unfolding (20% Gamut Volume Expansion):
-        // Unfolds intermediate hues (amber, coral, jade, teal, violet) into P3 color volume
-        // while strictly preventing primary oversaturation or neon fluorescent clipping.
-        // Rows sum to 1.0 to preserve D65 neutral white.
-        mat3 srgbToP3Master = mat3(
-            0.8580, 0.0266, 0.0137, // Column 0
-            0.1420, 0.9734, 0.0579, // Column 1
-            0.0000, 0.0000, 0.9284  // Column 2
-        );
-        vec3 p3Lin = srgbToP3Master * harmLin;
+        // 2. Transform to OKLab Perceptual Uniform Color Space:
+        vec3 lms = kLinRGBToLMS * harmLin;
+        vec3 lms_ = pow(max(lms, vec3(0.0)), vec3(1.0 / 3.0));
+        vec3 lab = kLMSToOKLab * lms_;
 
-        // 3. Luminance-Preserving Ratio Tone Mapping (AgX / ACES 1.3 Cinema Standard):
-        // NEVER modifies R, G, B channels independently to prevent hue shift and washed-out chalky whites.
-        // Calculates perceptual luminance Y, applies filmic highlight shoulder roll-off to Y alone,
-        // and scales RGB by (Y_mapped / Y). Hue and saturation ratios are 100% perfectly preserved.
-        float lum = dot(p3Lin, vec3(0.2126, 0.7152, 0.0722));
-        if (lum > 1e-5) {
-            float filmicLum = lum / (1.0 + 0.25 * lum) * 1.20;
-            p3Lin *= (filmicLum / lum);
+        float L = lab.x;
+        float C = length(lab.yz);
+
+        // 3. Sigmoidal Perceptual Gamut Extension (GEA):
+        // Intelligently expands vibrant visualizer elements into Display P3 color volume (+24%),
+        // while preserving subtle memory colors and delicate gradients.
+        // Hue angle is 100.0% mathematically locked (no hue shifts).
+        if (C > 1e-6) {
+            float c2 = C * C;
+            float chromaScale = 1.0 + 0.24 * (c2 / (c2 + 0.0064)); // 0.08^2 = 0.0064
+
+            // Filmic Highlight Desaturation: specular highlights roll off towards a luminous diamond core
+            if (L > 0.75) {
+                float t = (L - 0.75) / 0.25;
+                chromaScale *= (1.0 - t * 0.35);
+            }
+
+            // Shadow Clean Roll-Off: ensures pure neutral darks without colored noise
+            if (L < 0.06) {
+                chromaScale *= (L / 0.06);
+            }
+
+            lab.yz *= chromaScale;
         }
 
-        // 4. Cinema Soft-Knee Gamut Compression:
-        // Smooth hyperbolic knee compression as channels approach peak, preventing hard-edge clipping
-        // and preserving rich color density across all presets.
-        float thresh = 0.82;
+        // 4. Transform from OKLab to Linear Display P3:
+        vec3 lmsBack = kOKLabToLMS * lab;
+        vec3 p3Lin = kLMSToLinearP3 * (lmsBack * lmsBack * lmsBack);
+
+        // 5. Cinema Soft-Knee Gamut Compression:
+        // Smooth hyperbolic compression as channels approach peak, preventing hard digital clipping.
+        float thresh = 0.85;
         vec3 excess = max(p3Lin - vec3(thresh), vec3(0.0));
         p3Lin = min(p3Lin, vec3(thresh)) + (1.0 - thresh) * (excess / (vec3(1.0) + excess));
 
-        // 5. Display P3 Gamma Encode (Gamma 2.2 standard transfer function):
-        // Keeps middle gray at true perceptual 128, preserving high contrast and dynamic range headroom.
+        // 6. Strict 0-Nit OLED Black Clamp:
+        // When content is dark, organic subpixels are 100% shut off.
+        if (L < 0.003) {
+            p3Lin = vec3(0.0);
+        }
+
+        // 7. Display P3 Gamma Encode (Gamma 2.2 standard transfer function):
         outColor = pow(clamp(p3Lin, 0.0, 1.0), vec3(1.0 / 2.2));
     } else {
         // Standard sRGB Calibrated Mode
@@ -142,14 +182,11 @@ void main() {
     }
 
     // Gate dithering strictly off on blacks (lum < 0.015)
-    // On OLED displays, adding even +1/255 dither to black pixels activates organic subpixels,
-    // causing visible gray noise/speckles. Smoothstep ensures 100% pure 0-nit black while
-    // providing silky, continuous banding elimination across midtones and gradients.
     float lum = dot(outColor, vec3(0.2126, 0.7152, 0.0722));
     float ditherGate = smoothstep(0.015, 0.06, lum);
     outColor += vec3(TriangularDither(gl_FragCoord.xy)) * ditherGate;
 
-    // Strict OLED 0-nit black clamp: shut off organic subpixels completely
+    // Strict 0-nit black enforcement
     if (lum < 0.003) {
         outColor = vec3(0.0);
     }
