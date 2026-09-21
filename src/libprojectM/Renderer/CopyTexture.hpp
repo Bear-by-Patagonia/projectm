@@ -25,6 +25,14 @@ public:
     static bool IsWideGamutEnabled();
 
     /**
+     * @brief Sets the color profile mode:
+     * 0 = Natural (Cinema Reference, relaxed saturation, dye-transfer density) [Default]
+     * 1 = Vivid (Caribbean 4K HDR, expanded punchy saturation)
+     */
+    static void SetColorProfile(int profile);
+    static int GetColorProfile();
+
+    /**
      * @brief Marks this instance as the final presentation copier to the screen.
      * When true, applies Cinema Display P3 Remastering, 0-nit OLED black gating, and spatial dithering.
      * When false (default, e.g. internal preset flip filters), performs a pure 1:1 bit-exact texture copy.

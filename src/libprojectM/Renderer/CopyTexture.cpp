@@ -26,6 +26,7 @@ void main() {
 )";
 
 static bool s_wideGamutEnabled = true;
+static int s_colorProfile = 0; // Default: 0 = Natural (Cinema Reference, less saturated)
 
 void CopyTexture::SetWideGamutEnabled(bool enabled)
 {
@@ -35,6 +36,16 @@ void CopyTexture::SetWideGamutEnabled(bool enabled)
 bool CopyTexture::IsWideGamutEnabled()
 {
     return s_wideGamutEnabled;
+}
+
+void CopyTexture::SetColorProfile(int profile)
+{
+    s_colorProfile = profile;
+}
+
+int CopyTexture::GetColorProfile()
+{
+    return s_colorProfile;
 }
 
 void CopyTexture::SetIsScreenPresentation(bool enable)
@@ -52,6 +63,11 @@ extern "C" __attribute__((visibility("default"))) void projectm_set_wide_gamut_m
     CopyTexture::SetWideGamutEnabled(enabled);
 }
 
+extern "C" __attribute__((visibility("default"))) void projectm_set_color_profile(int profile)
+{
+    CopyTexture::SetColorProfile(profile);
+}
+
 static constexpr char CopyTextureFragmentShader[] = R"(
 precision highp float;
 
@@ -60,6 +76,7 @@ in vec2 fragment_tex_coord;
 uniform sampler2D texture_sampler;
 uniform int u_is_screen_presentation;
 uniform int u_wide_gamut_mode;
+uniform int u_color_profile; // 0 = Natural (Cinema Reference, less saturated) [default], 1 = Vivid (Caribbean 4K HDR)
 
 out vec4 color;
 
@@ -75,17 +92,17 @@ float TriangularDither(vec2 coord) {
     return (r1 + r2 - 1.0) / 255.0;
 }
 
-// Column-major matrices for OKLab <-> LMS <-> Display P3
+// --- Perceptual Color Space Constants (OKLab / OKLCH) ---
 const mat3 kLinRGBToLMS = mat3(
-    0.41222147, 0.21190350, 0.08830246,
-    0.53633254, 0.68069955, 0.28171884,
-    0.05144599, 0.10739696, 0.62997870
+    0.4122214708, 0.2119034982, 0.0883024619,
+    0.5363325363, 0.6806995451, 0.2817188376,
+    0.0514459929, 0.1073969566, 0.6299787005
 );
 
 const mat3 kLMSToOKLab = mat3(
-    0.21045426, 1.97799850, 0.02590404,
-    0.79361779, -2.42859221, 0.78277177,
-    -0.00407205, 0.45059371, -0.80867577
+    0.2104542553, 1.9779984951, 0.0259040371,
+    0.7936177850, -2.4285922050, 0.7827717662,
+    -0.0040720468, 0.4505937099, -0.8086757660
 );
 
 const mat3 kOKLabToLMS = mat3(
@@ -115,16 +132,19 @@ void main() {
     vec3 outColor;
 
     if (u_wide_gamut_mode == 1) {
-        // --- Caribbean 4K HDR Vibrant Master Pipeline (OKLCH Display P3) ---
+        // --- Display P3 Master Pipeline (OKLCH Perceptual Gamut Extension) ---
         vec3 linRGB = sRGBToLinear(rgb);
 
-        // 1. Spectral Harmonization (2.0% Subpixel Cushioning):
-        // Eliminates single-subpixel harsh laser spikes while preserving maximum visual punch.
+        // 1. Spectral Harmonization (Subpixel Cushioning):
+        // Profile 0 (Natural): 3.5% cushioning -> velvety, organic, dye-transfer density (Wizard of Oz / Back to the Future)
+        // Profile 1 (Vivid):   2.0% cushioning -> maximum punchy vibrancy (Caribbean 4K HDR)
         // Rows sum to 1.0, preserving neutral D65 white point bit-exactly.
+        float cushion = (u_color_profile == 1) ? 0.020 : 0.035;
+        float diag = 1.0 - 2.0 * cushion;
         mat3 spectralHarmonize = mat3(
-            0.960, 0.020, 0.020, // Column 0
-            0.020, 0.960, 0.020, // Column 1
-            0.020, 0.020, 0.960  // Column 2
+            diag, cushion, cushion, // Column 0
+            cushion, diag, cushion, // Column 1
+            cushion, cushion, diag  // Column 2
         );
         vec3 harmLin = spectralHarmonize * linRGB;
 
@@ -136,23 +156,26 @@ void main() {
         float L = lab.x;
         float C = length(lab.yz);
 
-        // 3. Caribbean 4K HDR Vibrance Expansion (Sigmoidal GEA):
-        // Expands visualizer elements by up to +38% into the wide Display P3 color volume,
-        // unlocking luminous ocean teals, radiant sunset ambers, and bioluminescent violets.
-        // Hue angle is 100.0% mathematically locked to prevent any color distortion.
+        // 3. Sigmoidal Gamut Extension (GEA) with Hue Angle Locking:
+        // Profile 0 (Natural): Gentle +16% expansion, relaxed, non-fatiguing, wide color breathing
+        // Profile 1 (Vivid):   Punchy +38% expansion into full P3 volume
+        // Hue angle is 100.0% mathematically locked to prevent any Hue Twisting (Abney effect).
         if (C > 1e-6) {
             float c2 = C * C;
-            float chromaScale = 1.0 + 0.38 * (c2 / (c2 + 0.0049)); // 0.07^2 = 0.0049
+            float maxBoost = (u_color_profile == 1) ? 0.38 : 0.16;
+            float midPoint = (u_color_profile == 1) ? 0.0049 : 0.0064;
+            float chromaScale = 1.0 + maxBoost * (c2 / (c2 + midPoint));
 
-            // Specular glint roll-off only in top highlights (> 0.82)
-            if (L > 0.82) {
-                float t = (L - 0.82) / 0.18;
-                chromaScale *= (1.0 - t * 0.28);
+            // Specular glint roll-off (Highlight Cusp - prevents neon highlights / plastic skin)
+            float rollStart = (u_color_profile == 1) ? 0.82 : 0.78;
+            if (L > rollStart) {
+                float t = (L - rollStart) / (1.0 - rollStart);
+                chromaScale *= (1.0 - t * 0.30);
             }
 
             // Shadow Clean Roll-Off: ensures pure neutral darks without colored noise
-            if (L < 0.04) {
-                chromaScale *= (L / 0.04);
+            if (L < 0.05) {
+                chromaScale *= (L / 0.05);
             }
 
             lab.yz *= chromaScale;
@@ -164,7 +187,7 @@ void main() {
 
         // 5. Cinema Soft-Knee Gamut Compression:
         // Smooth hyperbolic compression as channels approach peak, preventing hard digital clipping.
-        float thresh = 0.88;
+        float thresh = (u_color_profile == 1) ? 0.88 : 0.85;
         vec3 excess = max(p3Lin - vec3(thresh), vec3(0.0));
         p3Lin = min(p3Lin, vec3(thresh)) + (1.0 - thresh) * (excess / (vec3(1.0) + excess));
 
@@ -421,6 +444,7 @@ void CopyTexture::Copy(ShaderCache& shaderCache,
     shader->SetUniformInt("texture_sampler", 0);
     shader->SetUniformInt("u_is_screen_presentation", m_isScreenPresentation ? 1 : 0);
     shader->SetUniformInt("u_wide_gamut_mode", s_wideGamutEnabled ? 1 : 0);
+    shader->SetUniformInt("u_color_profile", s_colorProfile);
     shader->SetUniformMat4x4("vertex_transformation", flipMatrix);
 
     m_sampler.Bind(0);
@@ -448,6 +472,7 @@ void CopyTexture::Copy(ShaderCache& shaderCache,
     shader->SetUniformInt("texture_sampler", 0);
     shader->SetUniformInt("u_is_screen_presentation", m_isScreenPresentation ? 1 : 0);
     shader->SetUniformInt("u_wide_gamut_mode", s_wideGamutEnabled ? 1 : 0);
+    shader->SetUniformInt("u_color_profile", s_colorProfile);
     shader->SetUniformMat4x4("vertex_transformation", translationMatrix);
 
     m_sampler.Bind(0);
