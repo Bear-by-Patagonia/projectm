@@ -115,16 +115,16 @@ void main() {
     vec3 outColor;
 
     if (u_wide_gamut_mode == 1) {
-        // --- Intelligent Cinema P3 Master Pipeline (IMAX DMR / Dolby Cinema Standard) ---
+        // --- Caribbean 4K HDR Vibrant Master Pipeline (OKLCH Display P3) ---
         vec3 linRGB = sRGBToLinear(rgb);
 
-        // 1. Spectral Harmonization (2.5% Subpixel Cushioning):
-        // Replicates the optical emission bandwidth of physical light sources (fire, bioluminescence, lasers in atmosphere).
+        // 1. Spectral Harmonization (2.0% Subpixel Cushioning):
+        // Eliminates single-subpixel harsh laser spikes while preserving maximum visual punch.
         // Rows sum to 1.0, preserving neutral D65 white point bit-exactly.
         mat3 spectralHarmonize = mat3(
-            0.950, 0.025, 0.025, // Column 0
-            0.025, 0.950, 0.025, // Column 1
-            0.025, 0.025, 0.950  // Column 2
+            0.960, 0.020, 0.020, // Column 0
+            0.020, 0.960, 0.020, // Column 1
+            0.020, 0.020, 0.960  // Column 2
         );
         vec3 harmLin = spectralHarmonize * linRGB;
 
@@ -136,23 +136,23 @@ void main() {
         float L = lab.x;
         float C = length(lab.yz);
 
-        // 3. Sigmoidal Perceptual Gamut Extension (GEA):
-        // Intelligently expands vibrant visualizer elements into Display P3 color volume (+24%),
-        // while preserving subtle memory colors and delicate gradients.
-        // Hue angle is 100.0% mathematically locked (no hue shifts).
+        // 3. Caribbean 4K HDR Vibrance Expansion (Sigmoidal GEA):
+        // Expands visualizer elements by up to +38% into the wide Display P3 color volume,
+        // unlocking luminous ocean teals, radiant sunset ambers, and bioluminescent violets.
+        // Hue angle is 100.0% mathematically locked to prevent any color distortion.
         if (C > 1e-6) {
             float c2 = C * C;
-            float chromaScale = 1.0 + 0.24 * (c2 / (c2 + 0.0064)); // 0.08^2 = 0.0064
+            float chromaScale = 1.0 + 0.38 * (c2 / (c2 + 0.0049)); // 0.07^2 = 0.0049
 
-            // Filmic Highlight Desaturation: specular highlights roll off towards a luminous diamond core
-            if (L > 0.75) {
-                float t = (L - 0.75) / 0.25;
-                chromaScale *= (1.0 - t * 0.35);
+            // Specular glint roll-off only in top highlights (> 0.82)
+            if (L > 0.82) {
+                float t = (L - 0.82) / 0.18;
+                chromaScale *= (1.0 - t * 0.28);
             }
 
             // Shadow Clean Roll-Off: ensures pure neutral darks without colored noise
-            if (L < 0.06) {
-                chromaScale *= (L / 0.06);
+            if (L < 0.04) {
+                chromaScale *= (L / 0.04);
             }
 
             lab.yz *= chromaScale;
@@ -164,7 +164,7 @@ void main() {
 
         // 5. Cinema Soft-Knee Gamut Compression:
         // Smooth hyperbolic compression as channels approach peak, preventing hard digital clipping.
-        float thresh = 0.85;
+        float thresh = 0.88;
         vec3 excess = max(p3Lin - vec3(thresh), vec3(0.0));
         p3Lin = min(p3Lin, vec3(thresh)) + (1.0 - thresh) * (excess / (vec3(1.0) + excess));
 
