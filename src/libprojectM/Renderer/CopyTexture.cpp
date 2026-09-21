@@ -106,10 +106,10 @@ const mat3 kOKLabToLMS = mat3(
     0.21580376, -0.06385417, -1.29148554
 );
 
-const mat3 kLMSToLinearP3 = mat3(
-    3.12776915, -1.09101011, -0.02600875,
-    -2.25713598, 2.41333293, -0.50804375,
-    0.12936683, -0.32232282, 1.53405250
+const mat3 kLMSToLinearRGB = mat3(
+    4.0767416621, -1.2684380046, -0.0041960863, // Column 0
+   -3.3077115913,  2.6097574011, -0.7034186147, // Column 1
+    0.2309699292, -0.3413193965,  1.7076147010  // Column 2
 );
 
 void main() {
@@ -127,24 +127,11 @@ void main() {
     vec3 outColor;
 
     if (u_wide_gamut_mode == 1) {
-        // --- Display P3 Master Pipeline (OKLCH Perceptual Gamut Extension) ---
+        // --- Perceptual Color Pipeline (Symmetrical OKLCH Gamut Master) ---
         vec3 linRGB = sRGBToLinear(rgb);
 
-        // 1. Spectral Harmonization (Subpixel Cushioning):
-        // Profile 0 (Natural): 3.5% cushioning -> velvety, organic, dye-transfer density (Wizard of Oz / Back to the Future)
-        // Profile 1 (Vivid):   2.8% cushioning -> rich dye density with high vibrancy, preventing single-channel burn-out
-        // Rows sum to 1.0, preserving neutral D65 white point bit-exactly.
-        float cushion = (u_color_profile == 1) ? 0.028 : 0.035;
-        float diag = 1.0 - 2.0 * cushion;
-        mat3 spectralHarmonize = mat3(
-            diag, cushion, cushion, // Column 0
-            cushion, diag, cushion, // Column 1
-            cushion, cushion, diag  // Column 2
-        );
-        vec3 harmLin = spectralHarmonize * linRGB;
-
-        // 2. Transform to OKLab Perceptual Uniform Color Space:
-        vec3 lms = kLinRGBToLMS * harmLin;
+        // 1. Pure Direct Linear RGB to OKLab (Zero Cross-Channel Distortion / Zero Green Bias):
+        vec3 lms = kLinRGBToLMS * linRGB;
         vec3 lms_ = pow(max(lms, vec3(0.0)), vec3(1.0 / 3.0));
         vec3 lab = kLMSToOKLab * lms_;
 
@@ -161,13 +148,13 @@ void main() {
             lab.x = L;
         }
 
-        // 3. Dolby Vision-Inspired Cusp Gamut Extension with Hue Angle Locking:
-        // Profile 0 (Natural): Gentle +14% expansion, relaxed, non-fatiguing, wide color breathing
-        // Profile 1 (Vivid):   Punchy +26% expansion into P3 volume
+        // 2. Dolby Vision-Inspired Cusp Gamut Extension with Hue Angle Locking:
+        // Profile 0 (Natural): Gentle +15% expansion, relaxed, non-fatiguing, wide color breathing
+        // Profile 1 (Vivid):   Punchy +30% expansion into full volume
         // Hue angle is 100.0% mathematically locked to prevent any Hue Twisting (Abney effect).
         if (C > 1e-6) {
             float c2 = C * C;
-            float maxBoost = (u_color_profile == 1) ? 0.26 : 0.14;
+            float maxBoost = (u_color_profile == 1) ? 0.30 : 0.15;
             float midPoint = (u_color_profile == 1) ? 0.0049 : 0.0064;
 
             // Highlight Chroma Preservation Taper:
@@ -184,24 +171,24 @@ void main() {
             lab.yz *= chromaScale;
         }
 
-        // 4. Transform from OKLab to Linear Display P3:
+        // 3. Transform from OKLab to Linear RGB (Canonical Inverse - Zero Bias):
         vec3 lmsBack = kOKLabToLMS * lab;
-        vec3 p3Lin = kLMSToLinearP3 * (lmsBack * lmsBack * lmsBack);
+        vec3 linColor = kLMSToLinearRGB * (lmsBack * lmsBack * lmsBack);
 
-        // 5. Cinema Soft-Knee Gamut Compression:
+        // 4. Cinema Soft-Knee Gamut Compression:
         // Smooth hyperbolic compression as channels approach peak, preventing hard digital clipping.
-        float thresh = (u_color_profile == 1) ? 0.84 : 0.82;
-        vec3 excess = max(p3Lin - vec3(thresh), vec3(0.0));
-        p3Lin = min(p3Lin, vec3(thresh)) + (1.0 - thresh) * (excess / (vec3(1.0) + excess * 1.8));
+        float thresh = (u_color_profile == 1) ? 0.88 : 0.85;
+        vec3 excess = max(linColor - vec3(thresh), vec3(0.0));
+        linColor = min(linColor, vec3(thresh)) + (1.0 - thresh) * (excess / (vec3(1.0) + excess * 1.8));
 
-        // 6. Dolby Vision Continuous Shadow Toe (C1 Continuity):
+        // 5. Dolby Vision Continuous Shadow Toe (C1 Continuity):
         // Prevents harsh near-black contouring lines while ensuring 100% 0.000 nits on true blacks.
         // Below L < 0.008, applies smooth hermite roll-off reaching bit-exact 0.0 at L <= 0.0015.
         float blackToe = smoothstep(0.0015, 0.008, L);
-        p3Lin *= blackToe;
+        linColor *= blackToe;
 
-        // 7. Display P3 Gamma Encode (Gamma 2.2 standard transfer function):
-        outColor = pow(clamp(p3Lin, 0.0, 1.0), vec3(1.0 / 2.2));
+        // 6. Gamma Encode (Gamma 2.2 standard transfer function):
+        outColor = pow(clamp(linColor, 0.0, 1.0), vec3(1.0 / 2.2));
     } else {
         // Standard sRGB Calibrated Mode
         outColor = rgb;
