@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <fstream>
 #include <sstream>
+#include <string_view>
 #include <vector>
 
 namespace libprojectM {
@@ -38,36 +39,57 @@ auto PresetFileParser::Read(std::istream& presetStream) -> bool
         return false;
     }
 
-    size_t startPos{0}; //!< Starting position of current line
-    size_t pos{0};      //!< Current read position
+    std::string_view fileView(presetFileContents.data(), presetFileContents.size());
+    size_t startPos{0};
+    size_t endPos = presetFileContents.size();
 
-    auto parseLineIfDataAvailable = [this, &pos, &startPos, &presetFileContents]() -> bool {
-        if (pos > startPos)
+    // In MilkDrop 3.2 Double-Presets, Preset 2 is the primary preset matching the title/filename,
+    // while Preset 1 is a background/ambient layer. Load Preset 2 when present.
+    size_t p2Pos = fileView.find("[PRESET2_BEGIN]");
+    if (p2Pos != std::string_view::npos)
+    {
+        startPos = p2Pos;
+        size_t p2End = fileView.find("[PRESET2_END]", p2Pos);
+        if (p2End != std::string_view::npos)
+        {
+            endPos = p2End;
+        }
+    }
+    else
+    {
+        size_t p1Pos = fileView.find("[PRESET1_BEGIN]");
+        if (p1Pos != std::string_view::npos)
+        {
+            startPos = p1Pos;
+            size_t p1End = fileView.find("[PRESET1_END]", p1Pos);
+            if (p1End != std::string_view::npos)
+            {
+                endPos = p1End;
+            }
+        }
+    }
+
+    size_t lineStart = startPos;
+    size_t pos = startPos;
+
+    auto parseLineIfDataAvailable = [this, &pos, &lineStart, &presetFileContents]() {
+        if (pos > lineStart)
         {
             auto beg = presetFileContents.begin();
-            std::string line(beg + startPos, beg + pos);
-            if (line.rfind("[PRESET1_END]", 0) == 0 || line.rfind("[PRESET2_BEGIN]", 0) == 0)
-            {
-                return false;
-            }
+            std::string line(beg + lineStart, beg + pos);
             ParseLine(line);
         }
-        return true;
     };
 
-    while (pos < presetFileContents.size())
+    while (pos < endPos)
     {
         switch (presetFileContents[pos])
         {
             case '\r':
             case '\n':
                 // EOL, skip over CRLF
-                if (!parseLineIfDataAvailable())
-                {
-                    pos = presetFileContents.size();
-                    break;
-                }
-                startPos = pos + 1;
+                parseLineIfDataAvailable();
+                lineStart = pos + 1;
                 break;
 
             case '\0':
