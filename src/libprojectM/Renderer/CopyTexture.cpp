@@ -156,6 +156,16 @@ void main() {
         float L = lab.x;
         float C = length(lab.yz);
 
+        // Highlight Detail Preservation Shoulder (IMAX DMR / Filmic Roll-off):
+        // Softens blinding peak white burn-out, preserving fine waveform, particle, and animation details.
+        if (L > 0.72) {
+            float over = L - 0.72;
+            float maxOver = 0.28;
+            float shoulder = over / (1.0 + over * 1.6);
+            L = 0.72 + shoulder * (0.22 / (maxOver / (1.0 + maxOver * 1.6)));
+            lab.x = L;
+        }
+
         // 3. Dolby Vision-Inspired Cusp Gamut Extension with Hue Angle Locking:
         // Profile 0 (Natural): Gentle +16% expansion, relaxed, non-fatiguing, wide color breathing
         // Profile 1 (Vivid):   Punchy +38% expansion into full P3 volume
