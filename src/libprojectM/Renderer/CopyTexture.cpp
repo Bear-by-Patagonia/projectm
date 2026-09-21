@@ -90,24 +90,57 @@ void main() {
     vec3 outColor;
 
     if (u_wide_gamut_mode == 1) {
-        // --- Calibrated Cinema Remaster (Display P3) ---
+        // --- OLED Reference Master Color Pipeline (LG OLED Demo Quality) ---
         vec3 linRGB = sRGBToLinear(rgb);
 
-        // Standard CIE D65 Matrix with 18% Cinema P3 volume expansion
+        // 1. Spectral Harmonization (Subpixel Softening):
+        // Natural physical light sources always have spectral bandwidth.
+        // Injects delicate optical resonance into secondary channels so pure procedural primaries
+        // don't burn like single-subpixel laser stickers, transforming harsh reds into velvet ruby
+        // and harsh blues into ocean sapphire. Preserves D65 white point exactly (rows sum to 1.0).
+        mat3 spectralHarmonize = mat3(
+            0.910, 0.045, 0.045, // Column 0
+            0.045, 0.910, 0.045, // Column 1
+            0.045, 0.045, 0.910  // Column 2
+        );
+        vec3 harmLin = spectralHarmonize * linRGB;
+
+        // 2. Calibrated Cinema Display P3 Projection (18% Gamut Volume Expansion)
         mat3 srgbToP3Cinema = mat3(
             0.8544, 0.0272, 0.0140, // Column 0
             0.1456, 0.9728, 0.0594, // Column 1
             0.0000, 0.0000, 0.9266  // Column 2
         );
+        vec3 p3Lin = srgbToP3Cinema * harmLin;
 
-        vec3 p3Lin = srgbToP3Cinema * linRGB;
+        // 3. ACES Reference Gamut Compression (RGC Soft-Knee):
+        // Compresses extreme out-of-bounds saturation towards the achromatic (neutral) axis.
+        // Prevents primary channel clipping and allows delicate intermediate hues (amber, coral, teal) to breathe.
+        float achromatic = max(p3Lin.r, max(p3Lin.g, p3Lin.b));
+        if (achromatic > 1e-5) {
+            vec3 dist = (vec3(achromatic) - p3Lin) / achromatic;
+            float threshold = 0.70;
+            vec3 compDist = dist;
+            for (int i = 0; i < 3; i++) {
+                if (dist[i] > threshold) {
+                    float d = (dist[i] - threshold) / (1.0 - threshold);
+                    compDist[i] = threshold + (1.0 - threshold) * (d / (1.0 + 0.5 * d));
+                }
+            }
+            p3Lin = vec3(achromatic) - compDist * achromatic;
+        }
 
-        // Filmic highlight compression: softly tames blinding peaks so colors keep their rich identity
-        // instead of washing out into white or glaring harshly on OLED displays.
-        vec3 filmicP3 = p3Lin / (vec3(1.0) + 0.20 * p3Lin) * 1.20;
+        // 4. Filmic S-Curve Tone Mapping (ACES Fit):
+        // Delivers the velvety contrast of the LG OLED demo video:
+        // - Deep inky shadows with natural toe roll-off.
+        // - Rich, uncompressed, tactile midtones.
+        // - Smooth highlight shoulder: highlights maintain their rich color identity without glaring.
+        vec3 x = p3Lin;
+        vec3 filmic = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
+        filmic *= 1.244; // Normalize peak 1.0 -> 1.0
 
-        // Cinema OLED Gamma BT.1886 (2.35): deepens color presence and velvet contrast
-        outColor = pow(clamp(filmicP3, 0.0, 1.0), vec3(1.0 / 2.35));
+        // 5. Cinema OLED Gamma BT.1886 (2.35): deepens color density without lechoso cast
+        outColor = pow(clamp(filmic, 0.0, 1.0), vec3(1.0 / 2.35));
     } else {
         // Standard sRGB Calibrated Mode
         outColor = rgb;
