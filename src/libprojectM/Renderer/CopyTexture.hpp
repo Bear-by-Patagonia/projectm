@@ -19,6 +19,12 @@ public:
     CopyTexture();
 
     /**
+     * @brief Enables or disables Perceptual Display P3 Gamut Remastering in the blit copy pass.
+     */
+    static void SetWideGamutEnabled(bool enabled);
+    static bool IsWideGamutEnabled();
+
+    /**
      * @brief Copies the original texture into the currently bound framebuffer.
      * @param shaderCache The global shader cache instance.
      * @param originalTexture The texture to be copied.

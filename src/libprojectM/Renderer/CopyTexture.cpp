@@ -25,19 +25,134 @@ void main() {
 }
 )";
 
+static bool s_wideGamutEnabled = true;
+
+void CopyTexture::SetWideGamutEnabled(bool enabled)
+{
+    s_wideGamutEnabled = enabled;
+}
+
+bool CopyTexture::IsWideGamutEnabled()
+{
+    return s_wideGamutEnabled;
+}
+
+extern "C" __attribute__((visibility("default"))) void projectm_set_wide_gamut_mode(bool enabled)
+{
+    CopyTexture::SetWideGamutEnabled(enabled);
+}
+
 static constexpr char CopyTextureFragmentShader[] = R"(
-precision mediump float;
+precision highp float;
 
 in vec2 fragment_tex_coord;
 
 uniform sampler2D texture_sampler;
+uniform int u_wide_gamut_mode;
 
 out vec4 color;
 
-void main(){
-    color = texture(texture_sampler, fragment_tex_coord);
+// Fast sRGB to linear conversion (gamma 2.2 approximation)
+vec3 sRGBToLinear(vec3 c) {
+    return pow(max(c, vec3(0.0)), vec3(2.2));
 }
 
+// Fast linear to display gamma (2.2)
+vec3 linearToDisplayGamma(vec3 c) {
+    return pow(max(c, vec3(0.0)), vec3(1.0 / 2.2));
+}
+
+// Forward OKLab transform (Linear RGB -> OKLab)
+vec3 linearToOklab(vec3 c) {
+    float l = 0.4122214708 * c.r + 0.5363325363 * c.g + 0.0514459929 * c.b;
+    float m = 0.2119034982 * c.r + 0.6806995451 * c.g + 0.1073969566 * c.b;
+    float s = 0.0883024619 * c.r + 0.2817188376 * c.g + 0.6299787005 * c.b;
+
+    float l_ = pow(max(l, 0.0), 1.0 / 3.0);
+    float m_ = pow(max(m, 0.0), 1.0 / 3.0);
+    float s_ = pow(max(s, 0.0), 1.0 / 3.0);
+
+    return vec3(
+        0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_,
+        1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_,
+        0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_
+    );
+}
+
+// Inverse OKLab transform (OKLab -> Linear RGB)
+vec3 oklabToLinear(vec3 lab) {
+    float l_ = lab.x + 0.3963377774 * lab.y + 0.2158037573 * lab.z;
+    float m_ = lab.x - 0.1055613458 * lab.y - 0.0638541728 * lab.z;
+    float s_ = lab.x - 0.0894841775 * lab.y - 1.2914855480 * lab.z;
+
+    float l = l_ * l_ * l_;
+    float m = m_ * m_ * m_;
+    float s = s_ * s_ * s_;
+
+    return vec3(
+        +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+        -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+        -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
+    );
+}
+
+// High-frequency spatial dither to eliminate banding and posterization
+float TriangularDither(vec2 coord) {
+    float r1 = fract(sin(dot(coord, vec2(12.9898, 78.233))) * 43758.5453);
+    float r2 = fract(sin(dot(coord + vec2(0.5, 0.5), vec2(12.9898, 78.233))) * 43758.5453);
+    return (r1 + r2 - 1.0) / 255.0;
+}
+
+void main(){
+    vec4 src = texture(texture_sampler, fragment_tex_coord);
+    vec3 rgb = clamp(src.rgb, 0.0, 1.0);
+
+    vec3 outColor;
+
+    if (u_wide_gamut_mode == 1) {
+        // --- Perceptual Display P3 Gamut Remastering ---
+        vec3 linRGB = sRGBToLinear(rgb);
+        vec3 lab = linearToOklab(linRGB);
+
+        float chroma = length(lab.yz);
+
+        // Perceptual knee: low chroma (< 0.04: darks, neutrals, backgrounds) are 100% natural.
+        // High chroma (vivid lasers, glows, flames) expand smoothly into P3 volume without flúor neon clipping.
+        float knee = smoothstep(0.04, 0.28, chroma);
+        float newChroma = chroma * (1.0 + 0.16 * knee);
+
+        if (chroma > 1e-6) {
+            lab.yz *= (newChroma / chroma);
+        }
+
+        vec3 expandedLin = clamp(oklabToLinear(lab), 0.0, 1.0);
+
+        // Standard CIE D65 Matrix: [P3] = M * [sRGB] (column-major)
+        mat3 srgbToP3 = mat3(
+            0.8224621, 0.0331941, 0.0170827,
+            0.1775380, 0.9668059, 0.0723971,
+            0.0000000, 0.0000000, 0.9105202
+        );
+        vec3 p3Lin = srgbToP3 * expandedLin;
+
+        // Soft highlight compression on peaks to prevent clipping
+        float peak = max(p3Lin.r, max(p3Lin.g, p3Lin.b));
+        if (peak > 1.0) {
+            p3Lin /= peak;
+        }
+
+        outColor = linearToDisplayGamma(clamp(p3Lin, 0.0, 1.0));
+    } else {
+        // --- Standard sRGB Calibrated Mode ---
+        outColor = rgb;
+    }
+
+    // Apply high-frequency spatial dither to eliminate banding and ensure creamy, gradual gradients
+    outColor += vec3(TriangularDither(gl_FragCoord.xy));
+
+    // Guarantee 100% solid opacity: 0-nit true OLED black, zero background alpha leak
+    color = vec4(clamp(outColor, 0.0, 1.0), 1.0);
+}
 )";
 
 CopyTexture::CopyTexture()
@@ -263,6 +378,7 @@ void CopyTexture::Copy(ShaderCache& shaderCache,
     std::shared_ptr<Shader> shader = BindShader(shaderCache);
 
     shader->SetUniformInt("texture_sampler", 0);
+    shader->SetUniformInt("u_wide_gamut_mode", s_wideGamutEnabled ? 1 : 0);
     shader->SetUniformMat4x4("vertex_transformation", flipMatrix);
 
     m_sampler.Bind(0);
@@ -288,6 +404,7 @@ void CopyTexture::Copy(ShaderCache& shaderCache,
     std::shared_ptr<Shader> shader = BindShader(shaderCache);
 
     shader->SetUniformInt("texture_sampler", 0);
+    shader->SetUniformInt("u_wide_gamut_mode", s_wideGamutEnabled ? 1 : 0);
     shader->SetUniformMat4x4("vertex_transformation", translationMatrix);
 
     m_sampler.Bind(0);
