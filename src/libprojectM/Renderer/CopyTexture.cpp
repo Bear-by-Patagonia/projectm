@@ -153,32 +153,32 @@ void main() {
         float L = lab.x;
         float C = length(lab.yz);
 
-        // [Ajuste 1] Filmic Highlight Headroom & Shoulder (Tamed Peak Brightness):
-        // Softens peak brightness starting at L > 0.65, capping maximum luminance at ~0.89.
-        // This reserves 11% of pure headroom so high-energy audio beats and bright colors
-        // never clip into white or blow out fine textures and waveform contours.
-        if (L > 0.65) {
-            float over = L - 0.65;
-            float maxOver = 1.0 - 0.65;
-            float compressed = over / (1.0 + over * 2.2);
-            L = 0.65 + compressed * (0.24 / (maxOver / (1.0 + maxOver * 2.2)));
+        // [Punto Dulce Cinematográfico - Ajuste 1] Filmic Highlight Headroom (18% Headroom, Techo 0.82):
+        // Softens peak brightness starting earlier at L > 0.52, capping maximum luminance at ~0.82.
+        // Tames aggressive audio beat flashes, completely eliminating color clipping and preserving
+        // razor-sharp micro-textures and internal gradient lines in bright waveforms and filaments.
+        if (L > 0.52) {
+            float over = L - 0.52;
+            float maxOver = 1.0 - 0.52; // 0.48
+            float compressed = over / (1.0 + over * 2.0);
+            L = 0.52 + compressed * (0.30 / (maxOver / (1.0 + maxOver * 2.0)));
             lab.x = L;
         }
 
-        // [Ajuste 2] Low-End / Shadow Detail Lift:
-        // Gently lifts dark textures, nebulae, faint background stars, and subtle ripples
-        // in L in [0.002, 0.35], revealing micro-details without washing out OLED black.
-        if (L > 0.001 && L < 0.35) {
-            float shadowFactor = 1.0 - (L / 0.35);
-            L += 0.025 * shadowFactor * shadowFactor;
+        // [Punto Dulce Cinematográfico - Ajuste 2] Low-End Detail & Shadow Body Lift:
+        // Opens up shadow textures, nebulas, faint background stars, and subtle audio ripples
+        // in L in [0.002, 0.42], giving substantial body and presence to the low/mid range.
+        if (L > 0.001 && L < 0.42) {
+            float shadowFactor = 1.0 - (L / 0.42);
+            L += 0.038 * shadowFactor * shadowFactor;
             lab.x = L;
         }
 
-        // [Ajuste 3] Cinematic Color Volume Control (Natural Vibrance with Saturation Protection):
-        // Subtle, organic chroma breath (+3.5% in Vivid, +1.5% in Natural) instead of aggressive boost,
-        // preventing electric neon burn-out while allowing colors to breathe naturally.
-        // The Saturation Protection Envelope smoothly tapers boost to ZERO for already-saturated
-        // pure primaries (C > 0.10), retaining 100% of fine lines and texture micro-contrast.
+        // [Punto Dulce Cinematográfico - Ajuste 3] Cinematic Color Volume & Deep Low-Color Richness:
+        // Subtle, organic chroma breath (+3.5% in Vivid, +1.5% in Natural) with Saturation Protection Envelope.
+        // Tapers boost to ZERO on already-saturated pure primaries (C > 0.10) to preserve razor-sharp edges.
+        // Deep low-color density boost enhances chroma in dark tones (L in [0.015, 0.40]) so dark blues,
+        // wine reds, and forest greens look velvety and rich like Kodak Vision3 35mm film.
         if (C > 1e-6) {
             float maxBoost = (u_color_profile == 1) ? 0.035 : 0.015;
 
@@ -187,12 +187,18 @@ void main() {
             float boost = maxBoost * satProtection * (C / (C + 0.035));
 
             // Highlight Chroma Preservation Taper:
-            float highlightTaper = clamp(1.0 - max(0.0, L - 0.60) / 0.28, 0.0, 1.0);
+            float highlightTaper = clamp(1.0 - max(0.0, L - 0.52) / 0.30, 0.0, 1.0);
             float chromaScale = 1.0 + boost * highlightTaper;
 
+            // Deep low-color chromatic richness:
+            if (L > 0.015 && L < 0.40) {
+                float lowColorBoost = 1.0 - (L / 0.40);
+                chromaScale *= (1.0 + 0.06 * lowColorBoost * lowColorBoost);
+            }
+
             // Clean shadow toe: avoids chroma noise at extreme noise floor
-            if (L < 0.02) {
-                chromaScale *= smoothstep(0.001, 0.02, L);
+            if (L < 0.015) {
+                chromaScale *= smoothstep(0.001, 0.015, L);
             }
 
             lab.yz *= chromaScale;
@@ -203,8 +209,8 @@ void main() {
         vec3 linColor = kLMSToLinearRGB * (lmsBack * lmsBack * lmsBack);
 
         // Cinema Soft-Knee Gamut Compression:
-        // Maintains 100% linear micro-contrast up to 0.90, with gentle roll-off at the peak.
-        float thresh = 0.90;
+        // Matches the 0.82 cinematic ceiling with gentle roll-off
+        float thresh = 0.84;
         vec3 excess = max(linColor - vec3(thresh), vec3(0.0));
         linColor = min(linColor, vec3(thresh)) + (1.0 - thresh) * (excess / (vec3(1.0) + excess * 2.0));
 
