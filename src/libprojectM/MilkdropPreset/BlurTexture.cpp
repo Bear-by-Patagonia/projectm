@@ -103,7 +103,7 @@ auto BlurTexture::GetDescriptorsForBlurLevel(BlurTexture::BlurLevel blurLevel) c
     return descriptors;
 }
 
-void BlurTexture::Update(const Renderer::Texture& sourceTexture, const PerFrameContext& perFrameContext)
+void BlurTexture::Update(const Renderer::Texture& sourceTexture, const PerFrameContext& perFrameContext, GLuint currentFbo)
 {
     if (m_blurLevel == BlurLevel::None)
     {
@@ -142,12 +142,6 @@ void BlurTexture::Update(const Renderer::Texture& sourceTexture, const PerFrameC
     tempMax = (blurMax[2] - blurMin[1]) / (blurMax[1] - blurMin[1]);
     scale[2] = 1.0f / (tempMax - tempMin);
     bias[2] = -tempMin * scale[2];
-
-    // Remember previously bound framebuffer
-    GLint origReadFramebuffer;
-    GLint origDrawFramebuffer;
-    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &origReadFramebuffer);
-    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &origDrawFramebuffer);
 
     m_blurFramebuffer.Bind(0);
 
@@ -270,9 +264,8 @@ void BlurTexture::Update(const Renderer::Texture& sourceTexture, const PerFrameC
     const GLenum blurDiscards[] = { GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT };
     glInvalidateFramebuffer(GL_FRAMEBUFFER, 2, blurDiscards);
 
-    // Bind previous framebuffer and reset viewport size
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, origReadFramebuffer);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, origDrawFramebuffer);
+    // Bind previous framebuffer and reset viewport size without glGetIntegerv GPU pipeline stalls
+    glBindFramebuffer(GL_FRAMEBUFFER, currentFbo);
     glViewport(0, 0, sourceTexture.Width(), sourceTexture.Height());
 
     Renderer::Shader::Unbind();

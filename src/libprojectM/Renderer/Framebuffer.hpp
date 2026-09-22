@@ -107,6 +107,13 @@ public:
     auto Height() const -> int;
 
     /**
+     * @brief Returns the raw OpenGL framebuffer object ID at the given index.
+     * @param framebufferIndex The framebuffer index (default: 0).
+     * @return The GLuint framebuffer object ID.
+     */
+    auto GetFramebufferID(int framebufferIndex = 0) const -> GLuint;
+
+    /**
      * @brief Returns a texture attachment object.
      * @param framebufferIndex The framebuffer index.
      * @param type The attachment type to retrieve.

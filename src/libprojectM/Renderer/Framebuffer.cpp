@@ -121,6 +121,15 @@ auto Framebuffer::Height() const -> int
     return m_height;
 }
 
+auto Framebuffer::GetFramebufferID(int framebufferIndex) const -> GLuint
+{
+    if (framebufferIndex >= 0 && framebufferIndex < static_cast<int>(m_framebufferIds.size()))
+    {
+        return m_framebufferIds.at(framebufferIndex);
+    }
+    return 0;
+}
+
 auto Framebuffer::GetAttachment(int framebufferIndex, TextureAttachment::AttachmentType type, int attachmentIndex) const -> std::shared_ptr<TextureAttachment>
 {
     if (framebufferIndex < 0 || framebufferIndex >= static_cast<int>(m_framebufferIds.size()))

@@ -75,8 +75,9 @@ public:
      * @brief Renders the required blur passes on the given texture.
      * @param sourceTexture The texture to create the blur levels from.
      * @param perFrameContext The per-frame variables.
+     * @param currentFbo Active draw framebuffer ID to restore after blur pass.
      */
-    void Update(const Renderer::Texture& sourceTexture, const PerFrameContext& perFrameContext);
+    void Update(const Renderer::Texture& sourceTexture, const PerFrameContext& perFrameContext, GLuint currentFbo = 0);
 
     /**
      * @brief Binds the user-readable blur textures to the texture slots starting with the given index.
