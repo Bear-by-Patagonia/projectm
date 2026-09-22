@@ -123,6 +123,13 @@ void main() {
     }
 
     // --- Final Screen Presentation Pass ---
+    // Filmic CRT Overscan Compensation (1.025x micro-expansion):
+    // Recreates the natural bezel edge crop of classic CRT monitors, cleanly pushing
+    // hairline borders (ob_size <= 0.015) and edge-clamping artifacts outside the visible screen,
+    // while keeping the internal feedback loop 100% bit-exact and physically intact.
+    vec2 presentationUV = (fragment_tex_coord - 0.5) / 1.025 + 0.5;
+    src = texture(texture_sampler, presentationUV);
+
     vec3 rgb = clamp(src.rgb, 0.0, 1.0);
     vec3 outColor;
 
@@ -208,6 +215,13 @@ void main() {
     float lum = dot(outColor, vec3(0.2126, 0.7152, 0.0722));
     float finalBlackGate = smoothstep(0.0015, 0.006, lum);
     outColor *= finalBlackGate;
+
+    // Edge Dissolve: subtle 2-pixel hermite falloff at the absolute outer bezel boundary
+    // ensuring zero harsh 1-pixel seams against the TV frame
+    float edgeDist = min(min(fragment_tex_coord.x, 1.0 - fragment_tex_coord.x),
+                         min(fragment_tex_coord.y, 1.0 - fragment_tex_coord.y));
+    float edgeFade = smoothstep(0.0, 0.0025, edgeDist);
+    outColor *= edgeFade;
 
     // Guarantee 100% solid opacity: 0-nit true OLED black, zero background alpha leak
     color = vec4(clamp(outColor, 0.0, 1.0), 1.0);
