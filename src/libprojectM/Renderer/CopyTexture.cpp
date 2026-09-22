@@ -70,30 +70,42 @@ extern "C" __attribute__((visibility("default"))) void projectm_set_color_profil
     CopyTexture::SetColorProfile(profile);
 }
 
+// Fast 1:1 Bit-Exact Passthrough Fragment Shader for Internal Feedback/Flip Passes
 static constexpr char CopyTextureFragmentShader[] = R"(
+precision highp float;
+
+in vec2 fragment_tex_coord;
+uniform sampler2D texture_sampler;
+out vec4 color;
+
+void main() {
+    color = texture(texture_sampler, fragment_tex_coord);
+}
+)";
+
+// Highly Optimized OKLab Display P3 Presentation Fragment Shader
+static constexpr char PresentationTextureFragmentShader[] = R"(
 precision highp float;
 
 in vec2 fragment_tex_coord;
 
 uniform sampler2D texture_sampler;
-uniform int u_is_screen_presentation;
 uniform int u_wide_gamut_mode;
-uniform int u_color_profile; // 0 = Natural (Cinema Reference, less saturated) [default], 1 = Vivid (Caribbean 4K HDR)
+uniform int u_color_profile; // 0 = Natural, 1 = Vivid
 
 out vec4 color;
 
-// Accurate standard sRGB to linear conversion (piecewise standard transfer function)
-// Prevents artificial shadow crushing caused by naive power 2.2 on low display codes
+// Fast sRGB to Linear conversion using exp2(y * log2(x)) for single-cycle SFU execution on Mali/Adreno
 vec3 sRGBToLinear(vec3 c) {
     vec3 linearLow = c / 12.92;
-    vec3 linearHigh = pow((c + vec3(0.055)) / 1.055, vec3(2.4));
+    vec3 linearHigh = exp2(vec3(2.4) * log2(max((c + vec3(0.055)) / 1.055, vec3(1e-6))));
     return mix(linearHigh, linearLow, step(c, vec3(0.04045)));
 }
 
-// Accurate standard linear to sRGB display transfer function
+// Fast Linear to sRGB conversion using exp2(y * log2(x))
 vec3 linearToSRGB(vec3 c) {
     vec3 sRGBLow = c * 12.92;
-    vec3 sRGBHigh = 1.055 * pow(max(c, vec3(0.0)), vec3(1.0 / 2.4)) - vec3(0.055);
+    vec3 sRGBHigh = 1.055 * exp2(vec3(1.0 / 2.4) * log2(max(c, vec3(1e-6)))) - vec3(0.055);
     return mix(sRGBHigh, sRGBLow, step(c, vec3(0.0031308)));
 }
 
@@ -117,28 +129,16 @@ const mat3 kOKLabToLMS = mat3(
 );
 
 const mat3 kLMSToLinearRGB = mat3(
-    4.0767416621, -1.2684380046, -0.0041960863, // Column 0
-   -3.3077115913,  2.6097574011, -0.7034186147, // Column 1
-    0.2309699292, -0.3413193965,  1.7076147010  // Column 2
+    4.0767416621, -1.2684380046, -0.0041960863,
+   -3.3077115913,  2.6097574011, -0.7034186147,
+    0.2309699292, -0.3413193965,  1.7076147010
 );
 
 void main() {
-    vec4 src = texture(texture_sampler, fragment_tex_coord);
-
-    // If this is an internal texture copy/flip pass (e.g. MilkDrop feedback loop),
-    // perform a bit-exact 1:1 copy so preset colors and feedback loops are never corrupted.
-    if (u_is_screen_presentation == 0) {
-        color = src;
-        return;
-    }
-
-    // --- Final Screen Presentation Pass ---
+    // --- Single Texture Fetch ---
     // Filmic CRT Overscan Compensation (1.025x micro-expansion):
-    // Recreates the natural bezel edge crop of classic CRT monitors, cleanly pushing
-    // hairline borders (ob_size <= 0.015) and edge-clamping artifacts outside the visible screen,
-    // while keeping the internal feedback loop 100% bit-exact and physically intact.
     vec2 presentationUV = (fragment_tex_coord - 0.5) / 1.025 + 0.5;
-    src = texture(texture_sampler, presentationUV);
+    vec4 src = texture(texture_sampler, presentationUV);
 
     vec3 rgb = clamp(src.rgb, 0.0, 1.0);
     vec3 outColor;
@@ -147,7 +147,7 @@ void main() {
         // --- Perceptual Color Pipeline (Symmetrical OKLCH Gamut Master) ---
         vec3 linRGB = sRGBToLinear(rgb);
 
-        // 1. Pure Direct Linear RGB to OKLab (Zero Cross-Channel Distortion / Zero Green Bias):
+        // 1. Pure Direct Linear RGB to OKLab:
         vec3 lms = kLinRGBToLMS * linRGB;
         vec3 lms_ = pow(max(lms, vec3(0.0)), vec3(1.0 / 3.0));
         vec3 lab = kLMSToOKLab * lms_;
@@ -156,20 +156,15 @@ void main() {
         float C = length(lab.yz);
 
         // [Punto Dulce Cinematográfico v1.77 - Ajuste 1] Filmic Highlight Headroom (Techo 0.78-0.80 / 22% Headroom):
-        // Softens peak brightness starting earlier at L > 0.48, capping maximum luminance at ~0.78-0.80.
-        // Tames aggressive audio beat flashes, completely eliminating burned white areas and preserving
-        // razor-sharp micro-textures and internal gradient lines in bright waveforms and filaments.
         if (L > 0.48) {
             float over = L - 0.48;
-            float maxOver = 1.0 - 0.48; // 0.52
+            float maxOver = 0.52;
             float compressed = over / (1.0 + over * 2.2);
             L = 0.48 + compressed * (0.30 / (maxOver / (1.0 + maxOver * 2.2)));
             lab.x = L;
         }
 
         // [Punto Dulce Cinematográfico v1.77 - Ajuste 2] Low-End Texture Detail & Shadow Body Lift:
-        // Opens up shadow textures, nebulas, faint background stars, and subtle audio ripples
-        // in L in [0.0012, 0.45], giving substantial body, depth, and texture relief to the low/mid range.
         if (L > 0.0012 && L < 0.45) {
             float shadowFactor = 1.0 - (L / 0.45);
             L += 0.048 * shadowFactor * shadowFactor * (1.0 - 0.5 * shadowFactor);
@@ -177,9 +172,6 @@ void main() {
         }
 
         // [Punto Dulce Cinematográfico v1.77 - Ajuste 3] Desaturación de Colores Altos y Riqueza en Sombras:
-        // Gradually desaturates bright colors (L > 0.45) by up to 32% to prevent oversaturation and color clipping.
-        // Deep low-color density boost enhances chroma in dark tones (L in [0.012, 0.42]) so dark blues,
-        // wine reds, and forest greens look velvety, rich, and textured like Kodak Vision3 35mm film.
         float highLumDesat = 1.0;
         if (L > 0.45) {
             float highFactor = clamp((L - 0.45) / 0.35, 0.0, 1.0);
@@ -214,43 +206,33 @@ void main() {
             lab.yz *= chromaScale;
         }
 
-        // Transform from OKLab to Linear RGB (Canonical Inverse - Zero Bias):
+        // Transform from OKLab to Linear RGB:
         vec3 lmsBack = kOKLabToLMS * lab;
         vec3 linColor = kLMSToLinearRGB * (lmsBack * lmsBack * lmsBack);
 
         // Cinema Soft-Knee Gamut Compression:
-        // Matches the 0.78-0.80 cinematic ceiling with gentle roll-off
         float thresh = 0.80;
         vec3 excess = max(linColor - vec3(thresh), vec3(0.0));
         linColor = min(linColor, vec3(thresh)) + (1.0 - thresh) * (excess / (vec3(1.0) + excess * 2.2));
 
-        // 0-Nit True Black OLED Gate:
-        // Only gates the absolute noise floor (L <= 0.0008), preserving all faint particles,
-        // deep space waves, and low-energy audio reactivity down to 0.001.
-        float blackToe = smoothstep(0.0001, 0.0008, L);
-        linColor *= blackToe;
-
-        // Display Gamma Encode (Precise piecewise sRGB transfer):
-        outColor = linearToSRGB(clamp(linColor, 0.0, 1.0));
+        // Display Gamma Encode:
+        outColor = linearToSRGB(linColor);
     } else {
-        // Standard sRGB Calibrated Mode
         outColor = rgb;
     }
 
-    // Final 0-Nit True Black Hermite Gate:
-    // Guarantees absolute 0.000 nits on pure black backgrounds without crushing dark details
+    // Unified 0-Nit True Black Hermite Gate:
     float lum = dot(outColor, vec3(0.2126, 0.7152, 0.0722));
-    float finalBlackGate = smoothstep(0.0001, 0.0012, lum);
+    float finalBlackGate = smoothstep(0.0001, 0.0010, lum);
     outColor *= finalBlackGate;
 
-    // Edge Dissolve: subtle 2-pixel hermite falloff at the absolute outer bezel boundary
-    // ensuring zero harsh 1-pixel seams against the TV frame
+    // Edge Dissolve: 2-pixel hermite falloff at the outer bezel boundary
     float edgeDist = min(min(fragment_tex_coord.x, 1.0 - fragment_tex_coord.x),
                          min(fragment_tex_coord.y, 1.0 - fragment_tex_coord.y));
-    float edgeFade = smoothstep(0.0, 0.0025, edgeDist);
-    outColor *= edgeFade;
+    if (edgeDist < 0.0025) {
+        outColor *= smoothstep(0.0, 0.0025, edgeDist);
+    }
 
-    // Guarantee 100% solid opacity: 0-nit true OLED black, zero background alpha leak
     color = vec4(clamp(outColor, 0.0, 1.0), 1.0);
 }
 )";
@@ -478,9 +460,10 @@ void CopyTexture::Copy(ShaderCache& shaderCache,
     std::shared_ptr<Shader> shader = BindShader(shaderCache);
 
     shader->SetUniformInt("texture_sampler", 0);
-    shader->SetUniformInt("u_is_screen_presentation", m_isScreenPresentation ? 1 : 0);
-    shader->SetUniformInt("u_wide_gamut_mode", s_wideGamutEnabled.load(std::memory_order_relaxed) ? 1 : 0);
-    shader->SetUniformInt("u_color_profile", s_colorProfile.load(std::memory_order_relaxed));
+    if (m_isScreenPresentation) {
+        shader->SetUniformInt("u_wide_gamut_mode", s_wideGamutEnabled.load(std::memory_order_relaxed) ? 1 : 0);
+        shader->SetUniformInt("u_color_profile", s_colorProfile.load(std::memory_order_relaxed));
+    }
     shader->SetUniformMat4x4("vertex_transformation", flipMatrix);
 
     m_sampler.Bind(0);
@@ -506,9 +489,10 @@ void CopyTexture::Copy(ShaderCache& shaderCache,
     std::shared_ptr<Shader> shader = BindShader(shaderCache);
 
     shader->SetUniformInt("texture_sampler", 0);
-    shader->SetUniformInt("u_is_screen_presentation", m_isScreenPresentation ? 1 : 0);
-    shader->SetUniformInt("u_wide_gamut_mode", s_wideGamutEnabled.load(std::memory_order_relaxed) ? 1 : 0);
-    shader->SetUniformInt("u_color_profile", s_colorProfile.load(std::memory_order_relaxed));
+    if (m_isScreenPresentation) {
+        shader->SetUniformInt("u_wide_gamut_mode", s_wideGamutEnabled.load(std::memory_order_relaxed) ? 1 : 0);
+        shader->SetUniformInt("u_color_profile", s_colorProfile.load(std::memory_order_relaxed));
+    }
     shader->SetUniformMat4x4("vertex_transformation", translationMatrix);
 
     m_sampler.Bind(0);
@@ -522,11 +506,12 @@ void CopyTexture::Copy(ShaderCache& shaderCache,
 
 std::shared_ptr<Shader> CopyTexture::BindShader(ShaderCache& shaderCache)
 {
-    auto shader = m_shader.lock();
+    const char* shaderName = m_isScreenPresentation ? "copy_texture_presentation" : "copy_texture_passthrough";
+    auto shader = (m_isScreenPresentation ? m_presentationShader : m_copyShader).lock();
 
     if (!shader)
     {
-        shader = shaderCache.Get("copy_texture");
+        shader = shaderCache.Get(shaderName);
     }
 
     if (!shader)
@@ -534,13 +519,22 @@ std::shared_ptr<Shader> CopyTexture::BindShader(ShaderCache& shaderCache)
         std::string vertexShader(ShaderVersion);
         std::string fragmentShader(ShaderVersion);
         vertexShader.append(CopyTextureVertexShader);
-        fragmentShader.append(CopyTextureFragmentShader);
+
+        if (m_isScreenPresentation) {
+            fragmentShader.append(PresentationTextureFragmentShader);
+        } else {
+            fragmentShader.append(CopyTextureFragmentShader);
+        }
 
         shader = std::make_shared<Shader>();
         shader->CompileProgram(vertexShader, fragmentShader);
 
-        m_shader = shader;
-        shaderCache.Insert("copy_texture", shader);
+        if (m_isScreenPresentation) {
+            m_presentationShader = shader;
+        } else {
+            m_copyShader = shader;
+        }
+        shaderCache.Insert(shaderName, shader);
     }
 
     shader->Bind();
@@ -550,7 +544,15 @@ std::shared_ptr<Shader> CopyTexture::BindShader(ShaderCache& shaderCache)
 
 void CopyTexture::WarmUp(ShaderCache& shaderCache)
 {
+    bool savedState = m_isScreenPresentation;
+
+    m_isScreenPresentation = false;
     BindShader(shaderCache);
+
+    m_isScreenPresentation = true;
+    BindShader(shaderCache);
+
+    m_isScreenPresentation = savedState;
     Shader::Unbind();
 }
 

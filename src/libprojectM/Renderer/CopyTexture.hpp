@@ -138,7 +138,8 @@ private:
               int left, int top, int width, int height);
 
     Mesh m_mesh;
-    std::weak_ptr<Shader> m_shader;                  //!< Simple textured shader
+    std::weak_ptr<Shader> m_copyShader;          //!< Fast 1:1 passthrough copy shader
+    std::weak_ptr<Shader> m_presentationShader;  //!< OKLab Display P3 Presentation shader
     Framebuffer m_framebuffer{1};                    //!< Framebuffer for drawing the flipped texture
     Sampler m_sampler{GL_CLAMP_TO_EDGE, GL_NEAREST}; //!< Texture sampler settings
 
