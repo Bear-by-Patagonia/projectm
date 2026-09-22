@@ -25,27 +25,29 @@ void main() {
 }
 )";
 
-static bool s_wideGamutEnabled = true;
-static int s_colorProfile = 1; // Default: 1 = Vivid (Vibrante 4K), 0 = Natural (Cinematográfico Natural)
+#include <atomic>
+
+static std::atomic<bool> s_wideGamutEnabled{true};
+static std::atomic<int>  s_colorProfile{1}; // Default: 1 = Vivid (Vibrante 4K), 0 = Natural (Cinematográfico Natural)
 
 void CopyTexture::SetWideGamutEnabled(bool enabled)
 {
-    s_wideGamutEnabled = enabled;
+    s_wideGamutEnabled.store(enabled, std::memory_order_relaxed);
 }
 
 bool CopyTexture::IsWideGamutEnabled()
 {
-    return s_wideGamutEnabled;
+    return s_wideGamutEnabled.load(std::memory_order_relaxed);
 }
 
 void CopyTexture::SetColorProfile(int profile)
 {
-    s_colorProfile = profile;
+    s_colorProfile.store(profile, std::memory_order_relaxed);
 }
 
 int CopyTexture::GetColorProfile()
 {
-    return s_colorProfile;
+    return s_colorProfile.load(std::memory_order_relaxed);
 }
 
 void CopyTexture::SetIsScreenPresentation(bool enable)
@@ -153,32 +155,37 @@ void main() {
         float L = lab.x;
         float C = length(lab.yz);
 
-        // [Punto Dulce Cinematográfico - Ajuste 1] Filmic Highlight Headroom (18% Headroom, Techo 0.82):
-        // Softens peak brightness starting earlier at L > 0.52, capping maximum luminance at ~0.82.
-        // Tames aggressive audio beat flashes, completely eliminating color clipping and preserving
+        // [Punto Dulce Cinematográfico v1.77 - Ajuste 1] Filmic Highlight Headroom (Techo 0.78-0.80 / 22% Headroom):
+        // Softens peak brightness starting earlier at L > 0.48, capping maximum luminance at ~0.78-0.80.
+        // Tames aggressive audio beat flashes, completely eliminating burned white areas and preserving
         // razor-sharp micro-textures and internal gradient lines in bright waveforms and filaments.
-        if (L > 0.52) {
-            float over = L - 0.52;
-            float maxOver = 1.0 - 0.52; // 0.48
-            float compressed = over / (1.0 + over * 2.0);
-            L = 0.52 + compressed * (0.30 / (maxOver / (1.0 + maxOver * 2.0)));
+        if (L > 0.48) {
+            float over = L - 0.48;
+            float maxOver = 1.0 - 0.48; // 0.52
+            float compressed = over / (1.0 + over * 2.2);
+            L = 0.48 + compressed * (0.30 / (maxOver / (1.0 + maxOver * 2.2)));
             lab.x = L;
         }
 
-        // [Punto Dulce Cinematográfico - Ajuste 2] Low-End Detail & Shadow Body Lift:
+        // [Punto Dulce Cinematográfico v1.77 - Ajuste 2] Low-End Texture Detail & Shadow Body Lift:
         // Opens up shadow textures, nebulas, faint background stars, and subtle audio ripples
-        // in L in [0.002, 0.42], giving substantial body and presence to the low/mid range.
-        if (L > 0.001 && L < 0.42) {
-            float shadowFactor = 1.0 - (L / 0.42);
-            L += 0.038 * shadowFactor * shadowFactor;
+        // in L in [0.0012, 0.45], giving substantial body, depth, and texture relief to the low/mid range.
+        if (L > 0.0012 && L < 0.45) {
+            float shadowFactor = 1.0 - (L / 0.45);
+            L += 0.048 * shadowFactor * shadowFactor * (1.0 - 0.5 * shadowFactor);
             lab.x = L;
         }
 
-        // [Punto Dulce Cinematográfico - Ajuste 3] Cinematic Color Volume & Deep Low-Color Richness:
-        // Subtle, organic chroma breath (+3.5% in Vivid, +1.5% in Natural) with Saturation Protection Envelope.
-        // Tapers boost to ZERO on already-saturated pure primaries (C > 0.10) to preserve razor-sharp edges.
-        // Deep low-color density boost enhances chroma in dark tones (L in [0.015, 0.40]) so dark blues,
-        // wine reds, and forest greens look velvety and rich like Kodak Vision3 35mm film.
+        // [Punto Dulce Cinematográfico v1.77 - Ajuste 3] Desaturación de Colores Altos y Riqueza en Sombras:
+        // Gradually desaturates bright colors (L > 0.45) by up to 32% to prevent oversaturation and color clipping.
+        // Deep low-color density boost enhances chroma in dark tones (L in [0.012, 0.42]) so dark blues,
+        // wine reds, and forest greens look velvety, rich, and textured like Kodak Vision3 35mm film.
+        float highLumDesat = 1.0;
+        if (L > 0.45) {
+            float highFactor = clamp((L - 0.45) / 0.35, 0.0, 1.0);
+            highLumDesat = 1.0 - 0.32 * highFactor * highFactor;
+        }
+
         if (C > 1e-6) {
             float maxBoost = (u_color_profile == 1) ? 0.035 : 0.015;
 
@@ -187,18 +194,21 @@ void main() {
             float boost = maxBoost * satProtection * (C / (C + 0.035));
 
             // Highlight Chroma Preservation Taper:
-            float highlightTaper = clamp(1.0 - max(0.0, L - 0.52) / 0.30, 0.0, 1.0);
+            float highlightTaper = clamp(1.0 - max(0.0, L - 0.48) / 0.32, 0.0, 1.0);
             float chromaScale = 1.0 + boost * highlightTaper;
 
             // Deep low-color chromatic richness:
-            if (L > 0.015 && L < 0.40) {
-                float lowColorBoost = 1.0 - (L / 0.40);
-                chromaScale *= (1.0 + 0.06 * lowColorBoost * lowColorBoost);
+            if (L > 0.012 && L < 0.42) {
+                float lowColorBoost = 1.0 - (L / 0.42);
+                chromaScale *= (1.0 + 0.08 * lowColorBoost * lowColorBoost);
             }
 
+            // High luminance desaturation:
+            chromaScale *= highLumDesat;
+
             // Clean shadow toe: avoids chroma noise at extreme noise floor
-            if (L < 0.015) {
-                chromaScale *= smoothstep(0.001, 0.015, L);
+            if (L < 0.012) {
+                chromaScale *= smoothstep(0.001, 0.012, L);
             }
 
             lab.yz *= chromaScale;
@@ -209,10 +219,10 @@ void main() {
         vec3 linColor = kLMSToLinearRGB * (lmsBack * lmsBack * lmsBack);
 
         // Cinema Soft-Knee Gamut Compression:
-        // Matches the 0.82 cinematic ceiling with gentle roll-off
-        float thresh = 0.84;
+        // Matches the 0.78-0.80 cinematic ceiling with gentle roll-off
+        float thresh = 0.80;
         vec3 excess = max(linColor - vec3(thresh), vec3(0.0));
-        linColor = min(linColor, vec3(thresh)) + (1.0 - thresh) * (excess / (vec3(1.0) + excess * 2.0));
+        linColor = min(linColor, vec3(thresh)) + (1.0 - thresh) * (excess / (vec3(1.0) + excess * 2.2));
 
         // 0-Nit True Black OLED Gate:
         // Only gates the absolute noise floor (L <= 0.0008), preserving all faint particles,
@@ -469,8 +479,8 @@ void CopyTexture::Copy(ShaderCache& shaderCache,
 
     shader->SetUniformInt("texture_sampler", 0);
     shader->SetUniformInt("u_is_screen_presentation", m_isScreenPresentation ? 1 : 0);
-    shader->SetUniformInt("u_wide_gamut_mode", s_wideGamutEnabled ? 1 : 0);
-    shader->SetUniformInt("u_color_profile", s_colorProfile);
+    shader->SetUniformInt("u_wide_gamut_mode", s_wideGamutEnabled.load(std::memory_order_relaxed) ? 1 : 0);
+    shader->SetUniformInt("u_color_profile", s_colorProfile.load(std::memory_order_relaxed));
     shader->SetUniformMat4x4("vertex_transformation", flipMatrix);
 
     m_sampler.Bind(0);
@@ -497,8 +507,8 @@ void CopyTexture::Copy(ShaderCache& shaderCache,
 
     shader->SetUniformInt("texture_sampler", 0);
     shader->SetUniformInt("u_is_screen_presentation", m_isScreenPresentation ? 1 : 0);
-    shader->SetUniformInt("u_wide_gamut_mode", s_wideGamutEnabled ? 1 : 0);
-    shader->SetUniformInt("u_color_profile", s_colorProfile);
+    shader->SetUniformInt("u_wide_gamut_mode", s_wideGamutEnabled.load(std::memory_order_relaxed) ? 1 : 0);
+    shader->SetUniformInt("u_color_profile", s_colorProfile.load(std::memory_order_relaxed));
     shader->SetUniformMat4x4("vertex_transformation", translationMatrix);
 
     m_sampler.Bind(0);
