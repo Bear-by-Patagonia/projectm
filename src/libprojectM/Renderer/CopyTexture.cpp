@@ -80,12 +80,20 @@ uniform int u_color_profile; // 0 = Natural (Cinema Reference, less saturated) [
 
 out vec4 color;
 
-// Fast sRGB to linear conversion (gamma 2.2 approximation)
+// Accurate standard sRGB to linear conversion (piecewise standard transfer function)
+// Prevents artificial shadow crushing caused by naive power 2.2 on low display codes
 vec3 sRGBToLinear(vec3 c) {
-    return pow(max(c, vec3(0.0)), vec3(2.2));
+    vec3 linearLow = c / 12.92;
+    vec3 linearHigh = pow((c + vec3(0.055)) / 1.055, vec3(2.4));
+    return mix(linearHigh, linearLow, step(c, vec3(0.04045)));
 }
 
-
+// Accurate standard linear to sRGB display transfer function
+vec3 linearToSRGB(vec3 c) {
+    vec3 sRGBLow = c * 12.92;
+    vec3 sRGBHigh = 1.055 * pow(max(c, vec3(0.0)), vec3(1.0 / 2.4)) - vec3(0.055);
+    return mix(sRGBHigh, sRGBLow, step(c, vec3(0.0031308)));
+}
 
 // --- Perceptual Color Space Constants (OKLab / OKLCH) ---
 const mat3 kLinRGBToLMS = mat3(
@@ -145,75 +153,78 @@ void main() {
         float L = lab.x;
         float C = length(lab.yz);
 
-        // Highlight Detail Preservation Shoulder (IMAX DMR / Filmic Roll-off):
-        // Softens peak white burn-out while preserving razor-sharp edge contrast in waveforms and filaments.
-        float shoulderStart = (u_color_profile == 1) ? 0.80 : 0.82;
-        if (L > shoulderStart) {
-            float over = L - shoulderStart;
-            float maxOver = 1.0 - shoulderStart;
-            float shoulder = over / (1.0 + over * 1.8);
-            L = shoulderStart + shoulder * (maxOver * 0.75 / (maxOver / (1.0 + maxOver * 1.8)));
+        // [Ajuste 1] Filmic Highlight Headroom & Shoulder (Tamed Peak Brightness):
+        // Softens peak brightness starting at L > 0.65, capping maximum luminance at ~0.89.
+        // This reserves 11% of pure headroom so high-energy audio beats and bright colors
+        // never clip into white or blow out fine textures and waveform contours.
+        if (L > 0.65) {
+            float over = L - 0.65;
+            float maxOver = 1.0 - 0.65;
+            float compressed = over / (1.0 + over * 2.2);
+            L = 0.65 + compressed * (0.24 / (maxOver / (1.0 + maxOver * 2.2)));
             lab.x = L;
         }
 
-        // 2. Dolby Vision & ACES-Inspired True Vibrance with Saturation Protection:
-        // Boosts low/mid-saturation tones (+10% in Vivid) for modern color depth, but smoothly protects
-        // already-saturated pure Red, Green, and Blue, preventing channel clipping and preserving fine lines/textures.
+        // [Ajuste 2] Low-End / Shadow Detail Lift:
+        // Gently lifts dark textures, nebulae, faint background stars, and subtle ripples
+        // in L in [0.002, 0.35], revealing micro-details without washing out OLED black.
+        if (L > 0.001 && L < 0.35) {
+            float shadowFactor = 1.0 - (L / 0.35);
+            L += 0.025 * shadowFactor * shadowFactor;
+            lab.x = L;
+        }
+
+        // [Ajuste 3] Cinematic Color Volume Control (Natural Vibrance with Saturation Protection):
+        // Subtle, organic chroma breath (+3.5% in Vivid, +1.5% in Natural) instead of aggressive boost,
+        // preventing electric neon burn-out while allowing colors to breathe naturally.
+        // The Saturation Protection Envelope smoothly tapers boost to ZERO for already-saturated
+        // pure primaries (C > 0.10), retaining 100% of fine lines and texture micro-contrast.
         if (C > 1e-6) {
-            float maxBoost = (u_color_profile == 1) ? 0.10 : 0.04;
+            float maxBoost = (u_color_profile == 1) ? 0.035 : 0.015;
 
             // Saturation Protection Envelope:
-            // Full boost on subtle/mid-tones (C in 0.02 - 0.12) for rich color breathing.
-            // Tapers smoothly to 0 on already highly saturated colors (C > 0.14)
-            // ensuring red, green, and blue textures, lines, and borders remain 100% razor-sharp.
-            float satProtection = clamp(1.0 - max(0.0, C - 0.12) / 0.10, 0.0, 1.0);
+            float satProtection = clamp(1.0 - max(0.0, C - 0.10) / 0.08, 0.0, 1.0);
             float boost = maxBoost * satProtection * (C / (C + 0.035));
 
             // Highlight Chroma Preservation Taper:
-            // Prevents bright saturated highlights from burning into white
-            float highlightTaper = clamp(1.0 - max(0.0, L - 0.68) / 0.28, 0.0, 1.0);
+            float highlightTaper = clamp(1.0 - max(0.0, L - 0.60) / 0.28, 0.0, 1.0);
             float chromaScale = 1.0 + boost * highlightTaper;
 
-            // Volumetric Cusp Roll-Off (L > 0.78):
-            if (L > 0.78) {
-                float t = (L - 0.78) / 0.22;
-                chromaScale *= (1.0 - t * t * 0.18);
-            }
-
-            // Dolby Clean Shadow Toe: avoids noisy chroma in deep low-light regions
-            if (L < 0.05) {
-                chromaScale *= smoothstep(0.005, 0.05, L);
+            // Clean shadow toe: avoids chroma noise at extreme noise floor
+            if (L < 0.02) {
+                chromaScale *= smoothstep(0.001, 0.02, L);
             }
 
             lab.yz *= chromaScale;
         }
 
-        // 3. Transform from OKLab to Linear RGB (Canonical Inverse - Zero Bias):
+        // Transform from OKLab to Linear RGB (Canonical Inverse - Zero Bias):
         vec3 lmsBack = kOKLabToLMS * lab;
         vec3 linColor = kLMSToLinearRGB * (lmsBack * lmsBack * lmsBack);
 
-        // 4. Cinema Soft-Knee Gamut Compression:
-        // Maintains 100% linear micro-contrast up to 0.93, with gentle roll-off at the absolute peak.
-        float thresh = (u_color_profile == 1) ? 0.93 : 0.95;
+        // Cinema Soft-Knee Gamut Compression:
+        // Maintains 100% linear micro-contrast up to 0.90, with gentle roll-off at the peak.
+        float thresh = 0.90;
         vec3 excess = max(linColor - vec3(thresh), vec3(0.0));
-        linColor = min(linColor, vec3(thresh)) + (1.0 - thresh) * (excess / (vec3(1.0) + excess * 1.5));
+        linColor = min(linColor, vec3(thresh)) + (1.0 - thresh) * (excess / (vec3(1.0) + excess * 2.0));
 
-        // 5. Dolby Vision Continuous Shadow Toe (C1 Continuity):
-        // Prevents harsh near-black contouring lines while ensuring 100% 0.000 nits on true blacks.
-        // Below L < 0.008, applies smooth hermite roll-off reaching bit-exact 0.0 at L <= 0.0015.
-        float blackToe = smoothstep(0.0015, 0.008, L);
+        // 0-Nit True Black OLED Gate:
+        // Only gates the absolute noise floor (L <= 0.0008), preserving all faint particles,
+        // deep space waves, and low-energy audio reactivity down to 0.001.
+        float blackToe = smoothstep(0.0001, 0.0008, L);
         linColor *= blackToe;
 
-        // 6. Gamma Encode (Gamma 2.2 standard transfer function):
-        outColor = pow(clamp(linColor, 0.0, 1.0), vec3(1.0 / 2.2));
+        // Display Gamma Encode (Precise piecewise sRGB transfer):
+        outColor = linearToSRGB(clamp(linColor, 0.0, 1.0));
     } else {
         // Standard sRGB Calibrated Mode
         outColor = rgb;
     }
 
-    // Dolby Vision Display Management: Final 0-Nit True Black Hermite Gate
+    // Final 0-Nit True Black Hermite Gate:
+    // Guarantees absolute 0.000 nits on pure black backgrounds without crushing dark details
     float lum = dot(outColor, vec3(0.2126, 0.7152, 0.0722));
-    float finalBlackGate = smoothstep(0.0015, 0.006, lum);
+    float finalBlackGate = smoothstep(0.0001, 0.0012, lum);
     outColor *= finalBlackGate;
 
     // Edge Dissolve: subtle 2-pixel hermite falloff at the absolute outer bezel boundary
