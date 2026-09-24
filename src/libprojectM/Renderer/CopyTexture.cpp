@@ -155,52 +155,52 @@ void main() {
         float L = lab.x;
         float C = length(lab.yz);
 
-        // [Punto Dulce Cinematográfico v1.77 - Ajuste 1] Filmic Highlight Headroom (Techo 0.78-0.80 / 22% Headroom):
-        if (L > 0.48) {
-            float over = L - 0.48;
-            float maxOver = 0.52;
-            float compressed = over / (1.0 + over * 2.2);
-            L = 0.48 + compressed * (0.30 / (maxOver / (1.0 + maxOver * 2.2)));
+        // [Punto Dulce HDR F1-Style v1.80] Specular Highlight Punch (Peak 1.0 Brilliance):
+        // Normal colors stay natural; lights, lasers, and flashes reach 100% white brilliance
+        if (L > 0.52) {
+            float over = (L - 0.52) / 0.48;
+            L = 0.52 + over * 0.48 * (1.0 + 0.12 * over * (1.0 - over));
+            lab.x = clamp(L, 0.0, 1.0);
+        }
+
+        // [Punto Dulce HDR F1-Style v1.80] Deep True Blacks & Subtle Shadow Detail:
+        // Deep blacks stay 0-nit OLED black; shadow textures gain subtle definition without milky washout
+        if (L > 0.0015 && L < 0.32) {
+            float shadowFactor = 1.0 - (L / 0.32);
+            L += 0.010 * shadowFactor * shadowFactor;
             lab.x = L;
         }
 
-        // [Punto Dulce Cinematográfico v1.77 - Ajuste 2] Low-End Texture Detail & Shadow Body Lift:
-        if (L > 0.0012 && L < 0.45) {
-            float shadowFactor = 1.0 - (L / 0.45);
-            L += 0.048 * shadowFactor * shadowFactor * (1.0 - 0.5 * shadowFactor);
-            lab.x = L;
-        }
-
-        // [Punto Dulce Cinematográfico v1.77 - Ajuste 3] Desaturación de Colores Altos y Riqueza en Sombras:
-        float highLumDesat = 1.0;
-        if (L > 0.45) {
-            float highFactor = clamp((L - 0.45) / 0.35, 0.0, 1.0);
-            highLumDesat = 1.0 - 0.32 * highFactor * highFactor;
+        // [Punto Dulce HDR F1-Style v1.80] Radiant White Specular Roll-off (Abney Effect):
+        // Extremely bright lights naturally roll off into brilliant radiant white cores
+        float highlightWhiteRollOff = 1.0;
+        if (L > 0.60) {
+            float hlFactor = clamp((L - 0.60) / 0.40, 0.0, 1.0);
+            highlightWhiteRollOff = 1.0 - 0.45 * (hlFactor * hlFactor);
         }
 
         if (C > 1e-6) {
-            float maxBoost = (u_color_profile == 1) ? 0.035 : 0.015;
+            // Display P3 Vibrance Boost (Vivid = 0.042, Natural = 0.020)
+            float maxBoost = (u_color_profile == 1) ? 0.042 : 0.020;
 
-            // Saturation Protection Envelope:
-            float satProtection = clamp(1.0 - max(0.0, C - 0.10) / 0.08, 0.0, 1.0);
-            float boost = maxBoost * satProtection * (C / (C + 0.035));
+            // Saturation Protection: Protect already rich hues from clipping
+            float satProtection = clamp(1.0 - max(0.0, C - 0.12) / 0.10, 0.0, 1.0);
+            float boost = maxBoost * satProtection * (C / (C + 0.04));
 
-            // Highlight Chroma Preservation Taper:
-            float highlightTaper = clamp(1.0 - max(0.0, L - 0.48) / 0.32, 0.0, 1.0);
-            float chromaScale = 1.0 + boost * highlightTaper;
+            float chromaScale = 1.0 + boost;
 
-            // Deep low-color chromatic richness:
-            if (L > 0.012 && L < 0.42) {
+            // Deep chromatic richness in low-mid colors:
+            if (L > 0.015 && L < 0.42) {
                 float lowColorBoost = 1.0 - (L / 0.42);
-                chromaScale *= (1.0 + 0.08 * lowColorBoost * lowColorBoost);
+                chromaScale *= (1.0 + 0.06 * lowColorBoost * lowColorBoost);
             }
 
-            // High luminance desaturation:
-            chromaScale *= highLumDesat;
+            // Radiance desaturation for bright highlights:
+            chromaScale *= highlightWhiteRollOff;
 
-            // Clean shadow toe: avoids chroma noise at extreme noise floor
-            if (L < 0.012) {
-                chromaScale *= smoothstep(0.001, 0.012, L);
+            // Clean shadow toe (prevents chroma noise on deep darks):
+            if (L < 0.010) {
+                chromaScale *= smoothstep(0.001, 0.010, L);
             }
 
             lab.yz *= chromaScale;
@@ -210,10 +210,10 @@ void main() {
         vec3 lmsBack = kOKLabToLMS * lab;
         vec3 linColor = kLMSToLinearRGB * (lmsBack * lmsBack * lmsBack);
 
-        // Cinema Soft-Knee Gamut Compression:
-        float thresh = 0.80;
+        // Cinema Soft-Knee Gamut Compression (preserving specular dynamic range up to 0.95):
+        float thresh = 0.95;
         vec3 excess = max(linColor - vec3(thresh), vec3(0.0));
-        linColor = min(linColor, vec3(thresh)) + (1.0 - thresh) * (excess / (vec3(1.0) + excess * 2.2));
+        linColor = min(linColor, vec3(thresh)) + (1.0 - thresh) * (excess / (vec3(1.0) + excess * 2.0));
 
         // Display Gamma Encode:
         outColor = linearToSRGB(linColor);
