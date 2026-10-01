@@ -203,6 +203,12 @@ void PerPixelMesh::InitializeMesh(const PresetState& presetState)
             }
         }
     }
+
+    // Upload static mesh coordinates and polar radius/angle buffers once upon initialization
+    m_warpMesh.Update();
+    m_radiusAngleBuffer.Update();
+    m_viewportWidth = presetState.renderContext.viewportSizeX;
+    m_viewportHeight = presetState.renderContext.viewportSizeY;
 }
 
 
@@ -339,8 +345,7 @@ void PerPixelMesh::CalculateMesh([[maybe_unused]] const PresetState& presetState
         f3.get();
     }
 
-    m_warpMesh.Update();
-    m_radiusAngleBuffer.Update();
+    // Dynamic per-frame VBO updates for warp parameters (m_warpMesh & m_radiusAngleBuffer are static)
     m_zoomRotWarpBuffer.Update();
     m_centerBuffer.Update();
     m_distanceBuffer.Update();
