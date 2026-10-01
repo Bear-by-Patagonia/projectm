@@ -78,14 +78,14 @@ uniform float4x3 rot_rand4;
 #define fps      _c2.y
 #define frame    _c2.z
 #define progress _c2.w
-#define bass _c3.x
-#define mid  _c3.y
-#define treb _c3.z
-#define vol  _c3.w
-#define bass_att _c4.x
-#define mid_att  _c4.y
-#define treb_att _c4.z
-#define vol_att  _c4.w
+#define bass     max(_c3.x, 0.001)
+#define mid      max(_c3.y, 0.001)
+#define treb     max(_c3.z, 0.001)
+#define vol      max(_c3.w, 0.001)
+#define bass_att max(_c4.x, 0.001)
+#define mid_att  max(_c4.y, 0.001)
+#define treb_att max(_c4.z, 0.001)
+#define vol_att  max(_c4.w, 0.001)
 #define q1 _qa.x
 #define q2 _qa.y
 #define q3 _qa.z
