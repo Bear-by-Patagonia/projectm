@@ -324,14 +324,15 @@ void BlurTexture::GetSafeBlurMinMaxValues(const PerFrameContext& perFrameContext
 
 void BlurTexture::AllocateTextures(const Renderer::Texture& sourceTexture)
 {
-    int width = sourceTexture.Width();
-    int height = sourceTexture.Height();
+    // Halve initial blur texture dimensions for 0.5x downscale (saves ~8MB VRAM bandwidth per frame on TV GPU)
+    int width = std::max(16, sourceTexture.Width() / 2);
+    int height = std::max(16, sourceTexture.Height() / 2);
 
     if (m_blurTextures[0] != nullptr &&
-        width > 0 &&
-        height > 0 &&
-        width == m_sourceTextureWidth &&
-        height == m_sourceTextureHeight)
+        sourceTexture.Width() > 0 &&
+        sourceTexture.Height() > 0 &&
+        sourceTexture.Width() == m_sourceTextureWidth &&
+        sourceTexture.Height() == m_sourceTextureHeight)
     {
         // Size unchanged, return.
         return;
