@@ -106,6 +106,10 @@ void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audio
     m_flipTexture.Draw(*renderContext.shaderCache, m_framebuffer.GetColorAttachmentTexture(m_previousFrameBuffer, 0), nullptr, true, false);
     m_state.mainTexture = m_flipTexture.Texture();
 
+    // Invalidate depth/stencil attachments on current FBO before switching to prevent TBDR tile flushes to RAM
+    const GLenum fboDiscards[] = { GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT };
+    glInvalidateFramebuffer(GL_FRAMEBUFFER, 2, fboDiscards);
+
     // We now draw to the current framebuffer.
     m_framebuffer.Bind(m_currentFrameBuffer);
 
