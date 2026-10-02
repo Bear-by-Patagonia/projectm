@@ -209,6 +209,8 @@ void MilkdropPreset::PerFrameUpdate()
     // Clamp gamma and echo zoom values
     *m_perFrameContext.gamma = std::max(0.0, std::min(8.0, *m_perFrameContext.gamma));
     *m_perFrameContext.echo_zoom = std::max(0.001, std::min(1000.0, *m_perFrameContext.echo_zoom));
+
+    m_state.UpdateUniformConstants(m_perFrameContext);
 }
 
 void MilkdropPreset::Load(const std::string& pathname)

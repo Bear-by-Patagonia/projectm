@@ -23,6 +23,7 @@ namespace libprojectM {
 namespace MilkdropPreset {
 
 class PresetFileParser;
+class PerFrameContext;
 
 using BlendableFloat = float; //!< Currently a placeholder to mark blendable values.
 
@@ -163,6 +164,33 @@ public:
 
     static const glm::mat4 orthogonalProjection;        //!< Projection matrix that transforms DirectX screen-space coordinates into the OpenGL coordinate frame.
     static const glm::mat4 orthogonalProjectionFlipped; //!< Projection matrix that transforms DirectX screen-space coordinates into the OpenGL coordinate frame.
+
+    struct UniformConstantsCache {
+        int64_t lastFrameNumber{-1};
+        int lastViewportW{0};
+        int lastViewportH{0};
+
+        // Static viewport parameters (only recomputed on size change)
+        float c0[4]{};  // aspectX, aspectY, 1/aspectX, 1/aspectY
+        float c7[4]{};  // viewportSizeX, viewportSizeY, 1/w, 1/h
+        float c12[4]{}; // log2(w), log2(h), avg, 0.0f
+
+        // Per-frame parameters
+        float c2[4]{};  // timeSincePresetStartWrapped, fps, frame, progress
+        float c3[4]{};  // audioData: bass, mid, treb, vol
+        float c4[4]{};  // audioData: bassAtt, midAtt, trebAtt, volAtt
+        float c5[4]{};  // blur scale/bias 1 & 2
+        float c6[4]{};  // blur scale/bias 3 & min/max 1
+        float c8[4]{};  // fast trig cos
+        float c9[4]{};  // fast trig sin
+        float c10[4]{}; // slow trig cos
+        float c11[4]{}; // slow trig sin
+        float c13[4]{}; // blur min/max 2 & 3
+
+        float qValues[8][4]{}; // q1..q32 cast to float
+    } uniformCache;
+
+    void UpdateUniformConstants(const PerFrameContext& perFrameContext);
 };
 
 } // namespace MilkdropPreset

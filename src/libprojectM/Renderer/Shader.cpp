@@ -43,6 +43,8 @@ void Shader::CompileProgram(const std::string& vertexShaderSource,
     if (programLinked == GL_TRUE)
     {
         m_uniformLocationCache.clear();
+        m_uniformVec4Cache.clear();
+        m_uniformMat4Cache.clear();
         return;
     }
 
@@ -180,7 +182,21 @@ void Shader::SetUniformFloat4(GLint location, const float* values) const
     {
         return;
     }
+    auto& cached = m_uniformVec4Cache[location];
+    if (cached.valid &&
+        cached.v[0] == values[0] &&
+        cached.v[1] == values[1] &&
+        cached.v[2] == values[2] &&
+        cached.v[3] == values[3])
+    {
+        return; // Exact match, skip redundant glUniform4fv call!
+    }
     glUniform4fv(location, 1, values);
+    cached.valid = true;
+    cached.v[0] = values[0];
+    cached.v[1] = values[1];
+    cached.v[2] = values[2];
+    cached.v[3] = values[3];
 }
 
 void Shader::SetUniformInt4(const char* uniform, const glm::ivec4& values) const
@@ -220,7 +236,13 @@ void Shader::SetUniformMat4x4(GLint location, const glm::mat4x4& values) const
     {
         return;
     }
+    auto it = m_uniformMat4Cache.find(location);
+    if (it != m_uniformMat4Cache.end() && it->second == values)
+    {
+        return; // Exact match, skip redundant glUniformMatrix4fv call!
+    }
     glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(values));
+    m_uniformMat4Cache[location] = values;
 }
 
 GLuint Shader::CompileShader(const std::string& source, GLenum type)

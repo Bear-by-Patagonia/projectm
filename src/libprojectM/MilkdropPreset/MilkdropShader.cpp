@@ -165,14 +165,8 @@ void MilkdropShader::LoadTexturesAndCompile(PresetState& presetState)
 
 void MilkdropShader::LoadVariables(const PresetState& presetState, const PerFrameContext& perFrameContext)
 {
-    // These are the inputs: http://www.geisswerks.com/milkdrop/milkdrop_preset_authoring.html#3f6
-
-    auto floatTime = static_cast<float>(presetState.renderContext.time);
-    auto timeSincePresetStartWrapped = floatTime - static_cast<int>(floatTime / 10000.0) * 10000;
-
-    BlurTexture::Values blurMin;
-    BlurTexture::Values blurMax;
-    BlurTexture::GetSafeBlurMinMaxValues(perFrameContext, blurMin, blurMax);
+    // Ensure uniform constants cache is updated for the current frame
+    const_cast<PresetState&>(presetState).UpdateUniformConstants(perFrameContext);
 
     m_shader.Bind();
 
@@ -188,14 +182,7 @@ void MilkdropShader::LoadVariables(const PresetState& presetState, const PerFram
         m_shader.SetUniformFloat4(m_locRandPreset, m_randValues.data());
     }
 
-    if (m_locC[0] >= 0)
-    {
-        float const c0[4] = {presetState.renderContext.aspectX,
-                             presetState.renderContext.aspectY,
-                             1.0f / presetState.renderContext.aspectX,
-                             1.0f / presetState.renderContext.aspectY};
-        m_shader.SetUniformFloat4(m_locC[0], c0);
-    }
+    if (m_locC[0] >= 0) m_shader.SetUniformFloat4(m_locC[0], presetState.uniformCache.c0);
     if (m_locC[1] >= 0)
     {
         float const c1[4] = {(m_type == ShaderType::CompositeShader && s_hdrPeakModeEnabled) ? 1.0f : 0.0f,
@@ -204,112 +191,32 @@ void MilkdropShader::LoadVariables(const PresetState& presetState, const PerFram
                              0.0f};
         m_shader.SetUniformFloat4(m_locC[1], c1);
     }
-    if (m_locC[2] >= 0)
-    {
-        float const c2[4] = {timeSincePresetStartWrapped,
-                             presetState.renderContext.fps,
-                             static_cast<float>(presetState.renderContext.frame),
-                             presetState.renderContext.progress};
-        m_shader.SetUniformFloat4(m_locC[2], c2);
-    }
-    if (m_locC[3] >= 0)
-    {
-        float const c3[4] = {presetState.audioData.bass,
-                             presetState.audioData.mid,
-                             presetState.audioData.treb,
-                             presetState.audioData.vol};
-        m_shader.SetUniformFloat4(m_locC[3], c3);
-    }
-    if (m_locC[4] >= 0)
-    {
-        float const c4[4] = {presetState.audioData.bassAtt,
-                             presetState.audioData.midAtt,
-                             presetState.audioData.trebAtt,
-                             presetState.audioData.volAtt};
-        m_shader.SetUniformFloat4(m_locC[4], c4);
-    }
-    if (m_locC[5] >= 0)
-    {
-        float const c5[4] = {blurMax[0] - blurMin[0],
-                             blurMin[0],
-                             blurMax[1] - blurMin[1],
-                             blurMin[1]};
-        m_shader.SetUniformFloat4(m_locC[5], c5);
-    }
-    if (m_locC[6] >= 0)
-    {
-        float const c6[4] = {blurMax[2] - blurMin[2],
-                             blurMin[2],
-                             blurMin[0],
-                             blurMax[0]};
-        m_shader.SetUniformFloat4(m_locC[6], c6);
-    }
-    if (m_locC[7] >= 0)
-    {
-        float const c7[4] = {static_cast<float>(presetState.renderContext.viewportSizeX),
-                             static_cast<float>(presetState.renderContext.viewportSizeY),
-                             1.0f / static_cast<float>(presetState.renderContext.viewportSizeX),
-                             1.0f / static_cast<float>(presetState.renderContext.viewportSizeY)};
-        m_shader.SetUniformFloat4(m_locC[7], c7);
-    }
+    if (m_locC[2] >= 0) m_shader.SetUniformFloat4(m_locC[2], presetState.uniformCache.c2);
+    if (m_locC[3] >= 0) m_shader.SetUniformFloat4(m_locC[3], presetState.uniformCache.c3);
+    if (m_locC[4] >= 0) m_shader.SetUniformFloat4(m_locC[4], presetState.uniformCache.c4);
+    if (m_locC[5] >= 0) m_shader.SetUniformFloat4(m_locC[5], presetState.uniformCache.c5);
+    if (m_locC[6] >= 0) m_shader.SetUniformFloat4(m_locC[6], presetState.uniformCache.c6);
+    if (m_locC[7] >= 0) m_shader.SetUniformFloat4(m_locC[7], presetState.uniformCache.c7);
 
     if (m_hasFastTrigUniforms)
     {
-        if (m_locC[8] >= 0)
-        {
-            float const c8[4] = {0.5f + 0.5f * cosf(floatTime * 0.329f + 1.2f),
-                                 0.5f + 0.5f * cosf(floatTime * 1.293f + 3.9f),
-                                 0.5f + 0.5f * cosf(floatTime * 5.070f + 2.5f),
-                                 0.5f + 0.5f * cosf(floatTime * 20.051f + 5.4f)};
-            m_shader.SetUniformFloat4(m_locC[8], c8);
-        }
-        if (m_locC[9] >= 0)
-        {
-            float const c9[4] = {0.5f + 0.5f * sinf(floatTime * 0.329f + 1.2f),
-                                 0.5f + 0.5f * sinf(floatTime * 1.293f + 3.9f),
-                                 0.5f + 0.5f * sinf(floatTime * 5.070f + 2.5f),
-                                 0.5f + 0.5f * sinf(floatTime * 20.051f + 5.4f)};
-            m_shader.SetUniformFloat4(m_locC[9], c9);
-        }
+        if (m_locC[8] >= 0) m_shader.SetUniformFloat4(m_locC[8], presetState.uniformCache.c8);
+        if (m_locC[9] >= 0) m_shader.SetUniformFloat4(m_locC[9], presetState.uniformCache.c9);
     }
 
     if (m_hasSlowTrigUniforms)
     {
-        if (m_locC[10] >= 0)
-        {
-            float const c10[4] = {0.5f + 0.5f * cosf(floatTime * 0.0050f + 2.7f),
-                                  0.5f + 0.5f * cosf(floatTime * 0.0085f + 5.3f),
-                                  0.5f + 0.5f * cosf(floatTime * 0.0133f + 4.5f),
-                                  0.5f + 0.5f * cosf(floatTime * 0.0217f + 3.8f)};
-            m_shader.SetUniformFloat4(m_locC[10], c10);
-        }
-        if (m_locC[11] >= 0)
-        {
-            float const c11[4] = {0.5f + 0.5f * sinf(floatTime * 0.0050f + 2.7f),
-                                  0.5f + 0.5f * sinf(floatTime * 0.0085f + 5.3f),
-                                  0.5f + 0.5f * sinf(floatTime * 0.0133f + 4.5f),
-                                  0.5f + 0.5f * sinf(floatTime * 0.0217f + 3.8f)};
-            m_shader.SetUniformFloat4(m_locC[11], c11);
-        }
+        if (m_locC[10] >= 0) m_shader.SetUniformFloat4(m_locC[10], presetState.uniformCache.c10);
+        if (m_locC[11] >= 0) m_shader.SetUniformFloat4(m_locC[11], presetState.uniformCache.c11);
     }
 
-    if (m_locC[12] >= 0)
-    {
-        auto mipX = logf(static_cast<float>(presetState.renderContext.viewportSizeX)) / logf(2.0f);
-        auto mipY = logf(static_cast<float>(presetState.renderContext.viewportSizeY)) / logf(2.0f);
-        auto mipAvg = 0.5f * (mipX + mipY);
-        float const c12[4] = {mipX, mipY, mipAvg, 0.0f};
-        m_shader.SetUniformFloat4(m_locC[12], c12);
-    }
-    if (m_locC[13] >= 0)
-    {
-        float const c13[4] = {blurMin[1], blurMax[1], blurMin[2], blurMax[2]};
-        m_shader.SetUniformFloat4(m_locC[13], c13);
-    }
+    if (m_locC[12] >= 0) m_shader.SetUniformFloat4(m_locC[12], presetState.uniformCache.c12);
+    if (m_locC[13] >= 0) m_shader.SetUniformFloat4(m_locC[13], presetState.uniformCache.c13);
 
     // Lazy 3D Rotations: ONLY compute if preset shader actually references any rot_* uniform
     if (m_has3DRotationUniforms)
     {
+        auto floatTime = static_cast<float>(presetState.renderContext.time);
         std::array<glm::mat4, 24> tempMatrices{};
 
         // write matrices
@@ -349,19 +256,12 @@ void MilkdropShader::LoadVariables(const PresetState& presetState, const PerFram
         }
     }
 
-    // Set program uniform "_q[a-h]" values alias q[1-32] directly by cached location
+    // Set program uniform "_q[a-h]" values alias q[1-32] directly from precalculated cache
     for (size_t i = 0; i < 8; ++i)
     {
         if (m_locQ[i] >= 0)
         {
-            size_t const qIdx = i * 4;
-            float const qVals[4] = {
-                static_cast<float>(presetState.frameQVariables[qIdx]),
-                static_cast<float>(presetState.frameQVariables[qIdx + 1]),
-                static_cast<float>(presetState.frameQVariables[qIdx + 2]),
-                static_cast<float>(presetState.frameQVariables[qIdx + 3])
-            };
-            m_shader.SetUniformFloat4(m_locQ[i], qVals);
+            m_shader.SetUniformFloat4(m_locQ[i], presetState.uniformCache.qValues[i]);
         }
     }
 
