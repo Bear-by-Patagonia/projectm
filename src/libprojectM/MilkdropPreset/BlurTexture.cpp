@@ -121,7 +121,6 @@ void BlurTexture::Update(const Renderer::Texture& sourceTexture, const PerFrameC
     unsigned int const passes = static_cast<int>(m_blurLevel) * 2;
     auto const blur1EdgeDarken = static_cast<float>(*perFrameContext.blur1_edge_darken);
 
-    const std::array<float, 8> weights = {4.0f, 3.8f, 3.5f, 2.9f, 1.9f, 1.2f, 0.7f, 0.3f}; //<- user can specify these
 
     Values blurMin;
     Values blurMax;
@@ -233,11 +232,13 @@ void BlurTexture::Update(const Renderer::Texture& sourceTexture, const PerFrameC
             }
         }
 
-        // Direct FBO rendering: attach blur texture directly to color attachment 0 (eliminates glCopyTexSubImage2D stalls)
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_blurTextures[pass]->TextureID(), 0);
-
-        // Draw fullscreen quad directly into texture
+        // Draw fullscreen quad
         m_blurMesh.Draw();
+
+        // Save to blur texture
+        m_blurTextures[pass]->Bind(0);
+        glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, m_blurTextures[pass]->Width(), m_blurTextures[pass]->Height());
+        m_blurTextures[pass]->Unbind(0);
     }
 
     Renderer::Mesh::Unbind();
@@ -307,9 +308,8 @@ void BlurTexture::GetSafeBlurMinMaxValues(const PerFrameContext& perFrameContext
 
 void BlurTexture::AllocateTextures(const Renderer::Texture& sourceTexture)
 {
-    // Halve initial blur texture dimensions for 0.5x downscale (saves ~8MB VRAM bandwidth per frame on TV GPU)
-    int width = std::max(16, sourceTexture.Width() / 2);
-    int height = std::max(16, sourceTexture.Height() / 2);
+    int width = sourceTexture.Width();
+    int height = sourceTexture.Height();
 
     if (m_blurTextures[0] != nullptr &&
         sourceTexture.Width() > 0 &&
