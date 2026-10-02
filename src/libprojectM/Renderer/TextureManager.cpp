@@ -373,7 +373,7 @@ void TextureManager::ExtractTextureSettings(const std::string& qualifiedName, GL
     {
         name = qualifiedName.substr(3);
         filterMode = GL_LINEAR;
-        wrapMode = GL_MIRRORED_REPEAT;
+        wrapMode = GL_CLAMP_TO_EDGE;
     }
     else if (lowerQualifiedName.substr(0, 3) == "fw_" || lowerQualifiedName.substr(0, 3) == "wf_")
     {
@@ -385,7 +385,7 @@ void TextureManager::ExtractTextureSettings(const std::string& qualifiedName, GL
     {
         name = qualifiedName.substr(3);
         filterMode = GL_NEAREST;
-        wrapMode = GL_MIRRORED_REPEAT;
+        wrapMode = GL_CLAMP_TO_EDGE;
     }
     else if (lowerQualifiedName.substr(0, 3) == "pw_" || lowerQualifiedName.substr(0, 3) == "wp_")
     {

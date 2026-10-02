@@ -163,14 +163,6 @@ void main() {
             lab.x = clamp(L, 0.0, 1.0);
         }
 
-        // [Punto Dulce HDR F1-Style v1.80] Deep True Blacks & Subtle Shadow Detail:
-        // Deep blacks stay 0-nit OLED black; shadow textures gain subtle definition without milky washout
-        if (L > 0.0015 && L < 0.32) {
-            float shadowFactor = 1.0 - (L / 0.32);
-            L += 0.010 * shadowFactor * shadowFactor;
-            lab.x = L;
-        }
-
         // [Punto Dulce HDR F1-Style v1.80] Radiant White Specular Roll-off (Abney Effect):
         // Extremely bright lights naturally roll off into brilliant radiant white cores
         float highlightWhiteRollOff = 1.0;
@@ -180,20 +172,14 @@ void main() {
         }
 
         if (C > 1e-6) {
-            // Display P3 Vibrance Boost (Vivid = 0.042, Natural = 0.020)
-            float maxBoost = (u_color_profile == 1) ? 0.042 : 0.020;
+            // Display P3 Vibrance Boost (Vivid = 0.035, Natural = 0.015)
+            float maxBoost = (u_color_profile == 1) ? 0.035 : 0.015;
 
             // Saturation Protection: Protect already rich hues from clipping
             float satProtection = clamp(1.0 - max(0.0, C - 0.12) / 0.10, 0.0, 1.0);
             float boost = maxBoost * satProtection * (C / (C + 0.04));
 
             float chromaScale = 1.0 + boost;
-
-            // Deep chromatic richness in low-mid colors:
-            if (L > 0.015 && L < 0.42) {
-                float lowColorBoost = 1.0 - (L / 0.42);
-                chromaScale *= (1.0 + 0.06 * lowColorBoost * lowColorBoost);
-            }
 
             // Radiance desaturation for bright highlights:
             chromaScale *= highlightWhiteRollOff;
