@@ -231,12 +231,21 @@ private:
     GLuint m_shaderProgram{}; //!< The program ID.
     mutable std::unordered_map<std::string, GLint> m_uniformLocationCache; //!< Fast GLint location cache avoiding glGetUniformLocation string lookup.
 
+    struct CachedFloat {
+        bool valid{false};
+        float v{0.0f};
+    };
     struct CachedVec4 {
         bool valid{false};
         float v[4]{0.0f, 0.0f, 0.0f, 0.0f};
     };
-    mutable std::unordered_map<GLint, CachedVec4> m_uniformVec4Cache;
-    mutable std::unordered_map<GLint, glm::mat4> m_uniformMat4Cache;
+    struct CachedMat4 {
+        bool valid{false};
+        glm::mat4 m{1.0f};
+    };
+    mutable std::vector<CachedFloat> m_uniformFloatCache;
+    mutable std::vector<CachedVec4> m_uniformVec4Cache;
+    mutable std::vector<CachedMat4> m_uniformMat4Cache;
 };
 
 } // namespace Renderer

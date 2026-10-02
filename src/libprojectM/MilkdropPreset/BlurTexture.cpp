@@ -197,64 +197,47 @@ void BlurTexture::Update(const Renderer::Texture& sourceTexture, const PerFrameC
         if (pass % 2 == 0)
         {
             // pass 1 (long horizontal pass)
-            //-------------------------------------
-            const float w1 = weights[0] + weights[1];
-            const float w2 = weights[2] + weights[3];
-            const float w3 = weights[4] + weights[5];
-            const float w4 = weights[6] + weights[7];
-            const float d1 = 0 + 2 * weights[1] / w1;
-            const float d2 = 2 + 2 * weights[3] / w2;
-            const float d3 = 4 + 2 * weights[5] / w3;
-            const float d4 = 6 + 2 * weights[7] / w4;
-            const float w_div = 0.5f / (w1 + w2 + w3 + w4);
-            //-------------------------------------
-            //float4 _c0; // source texsize (.xy), and inverse (.zw)
-            //float4 _c1; // w1..w4
-            //float4 _c2; // d1..d4
-            //float4 _c3; // scale, bias, w_div, 0
-            //-------------------------------------
+            static const glm::vec4 s_c1{7.8f, 6.4f, 3.1f, 1.0f};
+            static const glm::vec4 s_c2{2.0f * 3.8f / 7.8f,
+                                        2.0f + 2.0f * 2.9f / 6.4f,
+                                        4.0f + 2.0f * 1.2f / 3.1f,
+                                        6.0f + 2.0f * 0.3f / 1.0f};
+            static constexpr float s_w_div = 0.5f / (7.8f + 6.4f + 3.1f + 1.0f);
+
             blurShader->SetUniformFloat4("_c0", {srcWidth, srcHeight, 1.0f / srcWidth, 1.0f / srcHeight});
-            blurShader->SetUniformFloat4("_c1", {w1, w2, w3, w4});
-            blurShader->SetUniformFloat4("_c2", {d1, d2, d3, d4});
-            blurShader->SetUniformFloat4("_c3", {scaleNow, biasNow, w_div, 0.0});
+            blurShader->SetUniformFloat4("_c1", s_c1);
+            blurShader->SetUniformFloat4("_c2", s_c2);
+            blurShader->SetUniformFloat4("_c3", {scaleNow, biasNow, s_w_div, 0.0f});
         }
         else
         {
             // pass 2 (short vertical pass)
-            //-------------------------------------
-            const float w1 = weights[0] + weights[1] + weights[2] + weights[3];
-            const float w2 = weights[4] + weights[5] + weights[6] + weights[7];
-            const float d1 = 0 + 2 * ((weights[2] + weights[3]) / w1);
-            const float d2 = 2 + 2 * ((weights[6] + weights[7]) / w2);
-            const float w_div = 1.0f / ((w1 + w2) * 2);
-            //-------------------------------------
-            //float4 _c0; // source texsize (.xy), and inverse (.zw)
-            //float4 _c5; // w1,w2,d1,d2
-            //float4 _c6; // w_div, edge_darken_c1, edge_darken_c2, edge_darken_c3
-            //-------------------------------------
+            static const glm::vec4 s_c5{14.2f, 4.1f,
+                                        2.0f * 6.4f / 14.2f,
+                                        2.0f + 2.0f * 1.0f / 4.1f};
+            static constexpr float s_w_div = 1.0f / ((14.2f + 4.1f) * 2.0f);
+
             blurShader->SetUniformFloat4("_c0", {srcWidth, srcHeight, 1.0f / srcWidth, 1.0f / srcHeight});
-            blurShader->SetUniformFloat4("_c5", {w1, w2, d1, d2});
+            blurShader->SetUniformFloat4("_c5", s_c5);
             // note: only do this first time; if you do it many times,
             // then the super-blurred levels will have big black lines along the top & left sides.
             if (pass == 1)
             {
                 // Darken edges
-                blurShader->SetUniformFloat4("_c6", {w_div, (1 - blur1EdgeDarken), blur1EdgeDarken, 5.0f});
+                blurShader->SetUniformFloat4("_c6", {s_w_div, (1.0f - blur1EdgeDarken), blur1EdgeDarken, 5.0f});
             }
             else
             {
                 // Don't darken
-                blurShader->SetUniformFloat4("_c6", {w_div, 1.0f, 0.0f, 5.0f});
+                blurShader->SetUniformFloat4("_c6", {s_w_div, 1.0f, 0.0f, 5.0f});
             }
         }
 
-        // Draw fullscreen quad
-        m_blurMesh.Draw();
+        // Direct FBO rendering: attach blur texture directly to color attachment 0 (eliminates glCopyTexSubImage2D stalls)
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_blurTextures[pass]->TextureID(), 0);
 
-        // Save to blur texture
-        m_blurTextures[pass]->Bind(0);
-        glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, m_blurTextures[pass]->Width(), m_blurTextures[pass]->Height());
-        m_blurTextures[pass]->Unbind(0);
+        // Draw fullscreen quad directly into texture
+        m_blurMesh.Draw();
     }
 
     Renderer::Mesh::Unbind();

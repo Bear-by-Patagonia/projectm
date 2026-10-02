@@ -1,7 +1,4 @@
-#include <future>
-#include <thread>
 #include <vector>
-#include <sched.h>
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
 #include <arm_neon.h>
 #endif
@@ -288,61 +285,41 @@ void PerPixelMesh::CalculateMesh([[maybe_unused]] const PresetState& presetState
     }
     else
     {
-        // -------------------------------------------------------------
-        // Multithreaded Worker Execution Offloaded to Cores 1, 2, 3 (Core 0 Free)
-        // -------------------------------------------------------------
-        auto process_slice = [&](int start_v, int end_v, int target_core) {
-            cpu_set_t cpuset;
-            CPU_ZERO(&cpuset);
-            CPU_SET(target_core, &cpuset);
-            sched_setaffinity(0, sizeof(cpu_set_t), &cpuset);
+        // Direct linear execution on render thread (warm L1 cache, zero thread spawn overhead, thread-safe)
+        for (int vertex = 0; vertex < totalVertices; ++vertex)
+        {
+            auto& curVertex = vertices[vertex];
+            auto& curRadiusAngle = m_radiusAngleBuffer[vertex];
+            auto& curZoomRotWarp = m_zoomRotWarpBuffer[vertex];
+            auto& curCenter = m_centerBuffer[vertex];
+            auto& curDistance = m_distanceBuffer[vertex];
+            auto& curStretch = m_stretchBuffer[vertex];
 
-            for (int vertex = start_v; vertex < end_v; ++vertex)
-            {
-                auto& curVertex = vertices[vertex];
-                auto& curRadiusAngle = m_radiusAngleBuffer[vertex];
-                auto& curZoomRotWarp = m_zoomRotWarpBuffer[vertex];
-                auto& curCenter = m_centerBuffer[vertex];
-                auto& curDistance = m_distanceBuffer[vertex];
-                auto& curStretch = m_stretchBuffer[vertex];
+            *perPixelContext.x = static_cast<double>(curVertex.X() * 0.5f + 0.5f);
+            *perPixelContext.y = static_cast<double>(curVertex.Y() * 0.5f + 0.5f);
+            *perPixelContext.rad = static_cast<double>(curRadiusAngle.radius);
+            *perPixelContext.ang = static_cast<double>(-curRadiusAngle.angle);
+            *perPixelContext.zoom = static_cast<double>(*perFrameContext.zoom);
+            *perPixelContext.zoomexp = static_cast<double>(*perFrameContext.zoomexp);
+            *perPixelContext.rot = static_cast<double>(*perFrameContext.rot);
+            *perPixelContext.warp = static_cast<double>(*perFrameContext.warp);
+            *perPixelContext.cx = static_cast<double>(*perFrameContext.cx);
+            *perPixelContext.cy = static_cast<double>(*perFrameContext.cy);
+            *perPixelContext.dx = static_cast<double>(*perFrameContext.dx);
+            *perPixelContext.dy = static_cast<double>(*perFrameContext.dy);
+            *perPixelContext.sx = static_cast<double>(*perFrameContext.sx);
+            *perPixelContext.sy = static_cast<double>(*perFrameContext.sy);
 
-                *perPixelContext.x = static_cast<double>(curVertex.X() * 0.5f + 0.5f);
-                *perPixelContext.y = static_cast<double>(curVertex.Y() * 0.5f + 0.5f);
-                *perPixelContext.rad = static_cast<double>(curRadiusAngle.radius);
-                *perPixelContext.ang = static_cast<double>(-curRadiusAngle.angle);
-                *perPixelContext.zoom = static_cast<double>(*perFrameContext.zoom);
-                *perPixelContext.zoomexp = static_cast<double>(*perFrameContext.zoomexp);
-                *perPixelContext.rot = static_cast<double>(*perFrameContext.rot);
-                *perPixelContext.warp = static_cast<double>(*perFrameContext.warp);
-                *perPixelContext.cx = static_cast<double>(*perFrameContext.cx);
-                *perPixelContext.cy = static_cast<double>(*perFrameContext.cy);
-                *perPixelContext.dx = static_cast<double>(*perFrameContext.dx);
-                *perPixelContext.dy = static_cast<double>(*perFrameContext.dy);
-                *perPixelContext.sx = static_cast<double>(*perFrameContext.sx);
-                *perPixelContext.sy = static_cast<double>(*perFrameContext.sy);
+            perPixelContext.ExecutePerPixelCode();
 
-                perPixelContext.ExecutePerPixelCode();
-
-                curZoomRotWarp.zoom = static_cast<float>(*perPixelContext.zoom);
-                curZoomRotWarp.zoomExp = static_cast<float>(*perPixelContext.zoomexp);
-                curZoomRotWarp.rot = static_cast<float>(*perPixelContext.rot);
-                curZoomRotWarp.warp = static_cast<float>(*perPixelContext.warp);
-                curCenter = {static_cast<float>(*perPixelContext.cx), static_cast<float>(*perPixelContext.cy)};
-                curDistance = {static_cast<float>(*perPixelContext.dx), static_cast<float>(*perPixelContext.dy)};
-                curStretch = {static_cast<float>(*perPixelContext.sx), static_cast<float>(*perPixelContext.sy)};
-            }
-        };
-
-        int slice1 = totalVertices / 3;
-        int slice2 = 2 * totalVertices / 3;
-
-        auto f1 = std::async(std::launch::async, process_slice, 0, slice1, 1);
-        auto f2 = std::async(std::launch::async, process_slice, slice1, slice2, 2);
-        auto f3 = std::async(std::launch::async, process_slice, slice2, totalVertices, 3);
-
-        f1.get();
-        f2.get();
-        f3.get();
+            curZoomRotWarp.zoom = static_cast<float>(*perPixelContext.zoom);
+            curZoomRotWarp.zoomExp = static_cast<float>(*perPixelContext.zoomexp);
+            curZoomRotWarp.rot = static_cast<float>(*perPixelContext.rot);
+            curZoomRotWarp.warp = static_cast<float>(*perPixelContext.warp);
+            curCenter = {static_cast<float>(*perPixelContext.cx), static_cast<float>(*perPixelContext.cy)};
+            curDistance = {static_cast<float>(*perPixelContext.dx), static_cast<float>(*perPixelContext.dy)};
+            curStretch = {static_cast<float>(*perPixelContext.sx), static_cast<float>(*perPixelContext.sy)};
+        }
     }
 
     // Dynamic per-frame VBO updates for warp parameters (m_warpMesh & m_radiusAngleBuffer are static)
@@ -355,28 +332,24 @@ void PerPixelMesh::CalculateMesh([[maybe_unused]] const PresetState& presetState
 void PerPixelMesh::WarpedBlit(const PresetState& presetState,
                               const PerFrameContext& perFrameContext)
 {
-    // Warp stuff
-    float const warpTime = presetState.renderContext.time * presetState.warpAnimSpeed;
-    float const warpScaleInverse = 1.0f / presetState.warpScale;
-    glm::vec4 const warpFactors{
-        11.68f + 4.0f * cosf(warpTime * 1.413f + 10),
-        8.77f + 3.0f * cosf(warpTime * 1.113f + 7),
-        10.54f + 3.0f * cosf(warpTime * 1.233f + 3),
-        11.49f + 4.0f * cosf(warpTime * 0.933f + 5),
-    };
-
-    // Texel alignment
-    glm::vec2 const texelOffsets{presetState.renderContext.texelOffsetX / static_cast<float>(presetState.renderContext.viewportSizeX),
-                                 presetState.renderContext.texelOffsetY / static_cast<float>(presetState.renderContext.viewportSizeY)};
-
-    // Decay
-    float decay = std::min(static_cast<float>(*perFrameContext.decay), 1.0f);
-
-    // No blending between presets here, so we make sure blending is disabled.
-    Renderer::BlendMode::SetBlendActive(false);
-
     if (!m_warpShader)
     {
+        // Warp calculations for default fallback shader
+        float const warpTime = presetState.renderContext.time * presetState.warpAnimSpeed;
+        float const warpScaleInverse = 1.0f / presetState.warpScale;
+        glm::vec4 const warpFactors{
+            11.68f + 4.0f * cosf(warpTime * 1.413f + 10),
+            8.77f + 3.0f * cosf(warpTime * 1.113f + 7),
+            10.54f + 3.0f * cosf(warpTime * 1.233f + 3),
+            11.49f + 4.0f * cosf(warpTime * 0.933f + 5),
+        };
+
+        // Texel alignment
+        glm::vec2 const texelOffsets{presetState.renderContext.texelOffsetX / static_cast<float>(presetState.renderContext.viewportSizeX),
+                                     presetState.renderContext.texelOffsetY / static_cast<float>(presetState.renderContext.viewportSizeY)};
+
+        float decay = std::min(static_cast<float>(*perFrameContext.decay), 1.0f);
+
         auto perPixelMeshShader = GetDefaultWarpShader(presetState);
         perPixelMeshShader->Bind();
         perPixelMeshShader->SetUniformMat4x4("vertex_transformation", PresetState::orthogonalProjection);
@@ -394,16 +367,6 @@ void PerPixelMesh::WarpedBlit(const PresetState& presetState,
     else
     {
         m_warpShader->LoadVariables(presetState, perFrameContext);
-        auto& shader = m_warpShader->Shader();
-        shader.SetUniformFloat4("aspect", {presetState.renderContext.aspectX,
-                                           presetState.renderContext.aspectY,
-                                           presetState.renderContext.invAspectX,
-                                           presetState.renderContext.invAspectY});
-        shader.SetUniformFloat("warpTime", warpTime);
-        shader.SetUniformFloat("warpScaleInverse", warpScaleInverse);
-        shader.SetUniformFloat4("warpFactors", warpFactors);
-        shader.SetUniformFloat2("texelOffset", texelOffsets);
-        shader.SetUniformFloat("decay", decay);
     }
 
     assert(!presetState.mainTexture.expired());

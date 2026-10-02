@@ -117,7 +117,19 @@ void Shader::SetUniformFloat(const char* uniform, float value) const
     {
         return;
     }
+    auto locIdx = static_cast<size_t>(location);
+    if (locIdx >= m_uniformFloatCache.size())
+    {
+        m_uniformFloatCache.resize(locIdx + 16);
+    }
+    auto& cached = m_uniformFloatCache[locIdx];
+    if (cached.valid && cached.v == value)
+    {
+        return;
+    }
     glUniform1fv(location, 1, &value);
+    cached.valid = true;
+    cached.v = value;
 }
 
 void Shader::SetUniformInt(const char* uniform, int value) const
@@ -182,7 +194,12 @@ void Shader::SetUniformFloat4(GLint location, const float* values) const
     {
         return;
     }
-    auto& cached = m_uniformVec4Cache[location];
+    auto locIdx = static_cast<size_t>(location);
+    if (locIdx >= m_uniformVec4Cache.size())
+    {
+        m_uniformVec4Cache.resize(locIdx + 16);
+    }
+    auto& cached = m_uniformVec4Cache[locIdx];
     if (cached.valid &&
         cached.v[0] == values[0] &&
         cached.v[1] == values[1] &&
@@ -236,13 +253,19 @@ void Shader::SetUniformMat4x4(GLint location, const glm::mat4x4& values) const
     {
         return;
     }
-    auto it = m_uniformMat4Cache.find(location);
-    if (it != m_uniformMat4Cache.end() && it->second == values)
+    auto locIdx = static_cast<size_t>(location);
+    if (locIdx >= m_uniformMat4Cache.size())
+    {
+        m_uniformMat4Cache.resize(locIdx + 16);
+    }
+    auto& cached = m_uniformMat4Cache[locIdx];
+    if (cached.valid && cached.m == values)
     {
         return; // Exact match, skip redundant glUniformMatrix4fv call!
     }
     glUniformMatrix4fv(location, 1, GL_FALSE, glm::value_ptr(values));
-    m_uniformMat4Cache[location] = values;
+    cached.valid = true;
+    cached.m = values;
 }
 
 GLuint Shader::CompileShader(const std::string& source, GLenum type)
