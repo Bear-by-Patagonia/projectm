@@ -12,6 +12,7 @@ Sampler::Sampler(const GLint wrapMode, const GLint filterMode)
     glSamplerParameteri(m_samplerId, GL_TEXTURE_MAG_FILTER, filterMode);
     glSamplerParameteri(m_samplerId, GL_TEXTURE_WRAP_S, wrapMode);
     glSamplerParameteri(m_samplerId, GL_TEXTURE_WRAP_T, wrapMode);
+    glSamplerParameteri(m_samplerId, GL_TEXTURE_WRAP_R, wrapMode);
 }
 
 
@@ -46,6 +47,7 @@ void Sampler::WrapMode(GLint wrapMode)
 
     glSamplerParameteri(m_samplerId, GL_TEXTURE_WRAP_S, wrapMode);
     glSamplerParameteri(m_samplerId, GL_TEXTURE_WRAP_T, wrapMode);
+    glSamplerParameteri(m_samplerId, GL_TEXTURE_WRAP_R, wrapMode);
 }
 
 auto Sampler::FilterMode() const -> GLint

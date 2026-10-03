@@ -141,6 +141,14 @@ void Texture::Update(const void* data) const
             // Unsupported, do nothing.
             break;
     }
+    glTexParameteri(m_target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(m_target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(m_target, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(m_target, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    if (m_target == GL_TEXTURE_3D)
+    {
+        glTexParameteri(m_target, GL_TEXTURE_WRAP_R, GL_REPEAT);
+    }
     glBindTexture(m_target, 0);
 }
 
@@ -159,6 +167,14 @@ void Texture::CreateNewTexture()
         default:
             // Unsupported, do nothing.
             break;
+    }
+    glTexParameteri(m_target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(m_target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(m_target, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(m_target, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    if (m_target == GL_TEXTURE_3D)
+    {
+        glTexParameteri(m_target, GL_TEXTURE_WRAP_R, GL_REPEAT);
     }
     glBindTexture(m_target, 0);
 }

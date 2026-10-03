@@ -232,14 +232,15 @@ void BlurTexture::Update(const Renderer::Texture& sourceTexture, const PerFrameC
             }
         }
 
-        // Draw fullscreen quad
-        m_blurMesh.Draw();
+        // Attach destination blur texture directly to FBO (zero-copy direct render-to-texture)
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_blurTextures[pass]->TextureID(), 0);
 
-        // Save to blur texture
-        m_blurTextures[pass]->Bind(0);
-        glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, m_blurTextures[pass]->Width(), m_blurTextures[pass]->Height());
-        m_blurTextures[pass]->Unbind(0);
+        // Draw fullscreen quad directly into target texture
+        m_blurMesh.Draw();
     }
+
+    // Detach texture from scratch FBO
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
 
     Renderer::Mesh::Unbind();
     Renderer::BlendMode::Set(false, Renderer::BlendMode::Function::SourceAlpha, Renderer::BlendMode::Function::OneMinusSourceAlpha);

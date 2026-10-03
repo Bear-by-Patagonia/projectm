@@ -24,9 +24,11 @@
 namespace libprojectM {
 namespace Renderer {
 
+static const uint32_t s_placeholderWhitePixel = 0xFFFFFFFF;
+
 TextureManager::TextureManager(const std::vector<std::string>& textureSearchPaths)
     : m_textureSearchPaths(textureSearchPaths)
-    , m_placeholderTexture(std::make_shared<Texture>("placeholder", 1, 1, false))
+    , m_placeholderTexture(std::make_shared<Texture>("placeholder", &s_placeholderWhitePixel, GL_TEXTURE_2D, 1, 1, 0, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, false))
 {
     Preload();
 }

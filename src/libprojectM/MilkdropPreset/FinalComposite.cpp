@@ -32,36 +32,37 @@ static std::string BuildDefaultCompositeShader(const PresetState& presetState)
 
     if (std::abs(presetState.gammaAdj - 1.0f) > 0.001f)
     {
-        code += "    ret *= " + std::to_string(presetState.gammaAdj) + ";\n";
+        code += "    ret = saturate(ret * " + std::to_string(presetState.gammaAdj) + ");\n";
     }
 
     if (presetState.shader >= 1.0f)
     {
-        code += "    ret *= hue_shader;\n";
+        code += "    ret = saturate(ret * hue_shader);\n";
     }
     else if (presetState.shader > 0.001f)
     {
-        code += "    ret *= " + std::to_string(1.0f - presetState.shader) + " + " +
-                std::to_string(presetState.shader) + " * hue_shader;\n";
+        code += "    ret = saturate(ret * (" + std::to_string(1.0f - presetState.shader) + " + " +
+                std::to_string(presetState.shader) + " * hue_shader));\n";
     }
 
     if (presetState.brighten)
     {
-        code += "    ret = sqrt(ret);\n";
+        code += "    ret = saturate(sqrt(ret));\n";
     }
     if (presetState.darken)
     {
-        code += "    ret *= ret;\n";
+        code += "    ret = saturate(ret * ret);\n";
     }
     if (presetState.solarize)
     {
-        code += "    ret = ret * (1.0 - ret) * 4.0;\n";
+        code += "    ret = saturate(ret * (1.0 - ret) * 4.0);\n";
     }
     if (presetState.invert)
     {
-        code += "    ret = 1.0 - ret;\n";
+        code += "    ret = saturate(1.0 - ret);\n";
     }
 
+    code += "    ret = saturate(ret);\n";
     code += "}\n";
     return code;
 }
@@ -124,9 +125,16 @@ void FinalComposite::CompileCompositeShader(PresetState& presetState)
             LOG_WARN("[FinalComposite] Error compiling composite shader code - Using Winamp fallback shader.");
 
             // Fall back to default shader
-            m_compositeShader = std::make_unique<MilkdropShader>(MilkdropShader::ShaderType::CompositeShader);
-            m_compositeShader->LoadCode(BuildDefaultCompositeShader(presetState));
-            m_compositeShader->LoadTexturesAndCompile(presetState);
+            try
+            {
+                m_compositeShader = std::make_unique<MilkdropShader>(MilkdropShader::ShaderType::CompositeShader);
+                m_compositeShader->LoadCode(BuildDefaultCompositeShader(presetState));
+                m_compositeShader->LoadTexturesAndCompile(presetState);
+            }
+            catch (const std::exception& fallbackEx)
+            {
+                LOG_ERROR("[FinalComposite] Failed compiling fallback composite shader: " + std::string(fallbackEx.what()));
+            }
         }
     }
 }
@@ -144,15 +152,6 @@ void FinalComposite::Draw(const PresetState& presetState, const PerFrameContext&
 
         m_compositeMesh.Draw();
         Renderer::Mesh::Unbind();
-    }
-    else
-    {
-        // Apply old-school filters
-        m_videoEcho->Draw();
-        if (m_filters)
-        {
-            m_filters->Draw();
-        }
     }
 
     Renderer::Shader::Unbind();

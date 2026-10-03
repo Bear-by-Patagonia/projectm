@@ -69,6 +69,18 @@ void MilkdropShader::LoadCode(const std::string& presetShaderCode)
     m_fragmentShaderCode = presetShaderCode;
     m_preprocessedCode = m_fragmentShaderCode;
 
+    // Apply preprocessor macro expansion first so sampler alias #defines
+    // (e.g. #define sampler_pic sampler_cells or #define sampler_pic sampler_rand00)
+    // are resolved before sampler discovery scans for active textures.
+    M4::Allocator allocator;
+    M4::HLSLTree tree(&allocator);
+    M4::HLSLParser parser(&allocator, &tree);
+    std::string expanded;
+    if (parser.ApplyPreprocessor("", m_preprocessedCode.c_str(), m_preprocessedCode.size(), expanded))
+    {
+        m_preprocessedCode = std::move(expanded);
+    }
+
     GetReferencedSamplers(m_preprocessedCode);
     PreprocessPresetShader(m_preprocessedCode);
 }
@@ -456,7 +468,7 @@ void PS(float4 _vDiffuse : COLOR,
         }
     }
 
-    std::string returnCode = "_return_value = float4(ret.xyz, 1.0);\n}\n";
+    std::string returnCode = "_return_value = float4(saturate(ret.xyz), 1.0);\n}\n";
 
     if (bracesOpen == 0)
     {
@@ -531,9 +543,13 @@ void MilkdropShader::GetReferencedSamplers(const std::string& program)
 
         if (end != std::string::npos)
         {
-            std::string const sampler = stripped.substr(static_cast<int>(found), static_cast<int>(end - found));
+            std::string sampler = stripped.substr(static_cast<int>(found), static_cast<int>(end - found));
+            while (sampler.rfind("sampler_", 0) == 0)
+            {
+                sampler = sampler.substr(8);
+            }
             // Skip "sampler_state", as it's a reserved word and not a sampler.
-            if (sampler != "state")
+            if (!sampler.empty() && sampler != "state")
             {
                 m_samplerNames.insert(sampler);
             }

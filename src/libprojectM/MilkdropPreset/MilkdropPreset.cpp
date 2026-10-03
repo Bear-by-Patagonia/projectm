@@ -128,8 +128,12 @@ void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audio
     {
         const auto warpedImage = m_framebuffer.GetColorAttachmentTexture(m_previousFrameBuffer, 0);
         assert(warpedImage.get());
-        m_state.blurTexture.Update(*warpedImage, m_perFrameContext, m_framebuffer.GetFramebufferID());
+        m_state.blurTexture.Update(*warpedImage, m_perFrameContext, m_framebuffer.GetFramebufferID(m_currentFrameBuffer));
     }
+
+    // Always restore current framebuffer and viewport before rendering shapes & waveforms
+    m_framebuffer.Bind(m_currentFrameBuffer);
+    glViewport(0, 0, renderContext.viewportSizeX, renderContext.viewportSizeY);
 
     // Draw audio-data-related stuff
     for (auto& shape : m_customShapes)

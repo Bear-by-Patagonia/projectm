@@ -276,8 +276,31 @@ void ProjectM::CheckGLSLVersion()
 
 void ProjectM::LoadIdlePreset()
 {
-    LoadPresetFile("idle://Geiss & Sperl - Feedback (projectM idle HDR mix).milk", false);
-    assert(m_activePreset);
+    try
+    {
+        LoadPresetFile("idle://Geiss & Sperl - Feedback (projectM idle HDR mix).milk", false);
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR("[ProjectM] LoadIdlePreset exception: " + std::string(ex.what()));
+    }
+
+    if (!m_activePreset)
+    {
+        LOG_WARN("[ProjectM] Safe fallback allocation for idle preset.");
+        try
+        {
+            auto idle = m_presetFactoryManager->CreatePresetFromFile("idle://");
+            if (idle)
+            {
+                StartPresetTransition(std::move(idle), true);
+            }
+        }
+        catch (const std::exception& ex)
+        {
+            LOG_ERROR("[ProjectM] Could not allocate idle preset: " + std::string(ex.what()));
+        }
+    }
 }
 
 void ProjectM::SetWindowSize(uint32_t width, uint32_t height)

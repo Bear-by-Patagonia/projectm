@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <regex>
 #include <sstream>
 #include <string_view>
 #include <vector>
@@ -206,6 +207,19 @@ void PresetFileParser::ParseLine(const std::string& line)
     // Convert key to lower case, as INI functions are not case-sensitive.
     std::string varName(ToLower(std::string(line.begin(), line.begin() + varNameDelimiterPos)));
     std::string value(line.begin() + varNameDelimiterPos + 1, line.end());
+
+    // Auto-repair naive legacy regex corruption "max(func, 0.0001)(" -> "func("
+    if (value.find("0.0001)") != std::string::npos)
+    {
+        static const std::regex s_badMaxRegex(R"(max\s*\(\s*([a-zA-Z0-9_]+)\s*,\s*0\.0001\s*\)\s*\()");
+        value = std::regex_replace(value, s_badMaxRegex, "$1(");
+    }
+    // Auto-repair accidental double sampler prefix "sampler_sampler_" -> "sampler_"
+    if (value.find("sampler_sampler_") != std::string::npos)
+    {
+        static const std::regex s_doubleSampler(R"(\bsampler_sampler_)");
+        value = std::regex_replace(value, s_doubleSampler, "sampler_");
+    }
 
     // Only add first occurrence to mimic Milkdrop behaviour
     if (!varName.empty() && m_presetValues.find(varName) == m_presetValues.end())

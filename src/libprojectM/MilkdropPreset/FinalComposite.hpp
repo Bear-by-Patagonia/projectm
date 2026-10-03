@@ -1,8 +1,6 @@
 #pragma once
 
-#include "Filters.hpp"
 #include "MilkdropShader.hpp"
-#include "VideoEcho.hpp"
 
 #include <Renderer/Mesh.hpp>
 
@@ -93,9 +91,7 @@ private:
     int m_viewportWidth{};  //!< Last known viewport width.
     int m_viewportHeight{}; //!< Last known viewport height.
 
-    std::unique_ptr<MilkdropShader> m_compositeShader; //!< The composite shader. Either preset-defined or empty.
-    std::unique_ptr<VideoEcho> m_videoEcho;            //!< Video echo effect. Used if no composite shader is loaded and video echo is enabled.
-    std::unique_ptr<Filters> m_filters;                //!< Color post-processing filters. Used if no composite shader is loaded.
+    std::unique_ptr<MilkdropShader> m_compositeShader; //!< The composite shader. Either preset-defined or generated Winamp fallback.
 };
 
 } // namespace MilkdropPreset

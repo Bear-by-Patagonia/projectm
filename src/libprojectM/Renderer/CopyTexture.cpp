@@ -109,29 +109,12 @@ vec3 linearToSRGB(vec3 c) {
     return mix(sRGBHigh, sRGBLow, step(c, vec3(0.0031308)));
 }
 
-// --- Perceptual Color Space Constants (OKLab / OKLCH) ---
-const mat3 kLinRGBToLMS = mat3(
-    0.4122214708, 0.2119034982, 0.0883024619,
-    0.5363325363, 0.6806995451, 0.2817188376,
-    0.0514459929, 0.1073969566, 0.6299787005
-);
-
-const mat3 kLMSToOKLab = mat3(
-    0.2104542553, 1.9779984951, 0.0259040371,
-    0.7936177850, -2.4285922050, 0.7827717662,
-    -0.0040720468, 0.4505937099, -0.8086757660
-);
-
-const mat3 kOKLabToLMS = mat3(
-    1.00000000, 1.00000001, 1.00000005,
-    0.39633779, -0.10556134, -0.08948418,
-    0.21580376, -0.06385417, -1.29148554
-);
-
-const mat3 kLMSToLinearRGB = mat3(
-    4.0767416621, -1.2684380046, -0.0041960863,
-   -3.3077115913,  2.6097574011, -0.7034186147,
-    0.2309699292, -0.3413193965,  1.7076147010
+// Standard Colorimetric Linear sRGB to Linear Display P3 (D65) Conversion Matrix
+// Preserves exact original Winamp CRT sRGB chromaticity coordinates on wide-gamut Display P3 panels.
+const mat3 kLinearSRGBToLinearP3 = mat3(
+    vec3(0.8224621, 0.0331941, 0.0170827),
+    vec3(0.1775380, 0.9668059, 0.0723974),
+    vec3(0.0000000, 0.0000000, 0.9105199)
 );
 
 void main() {
@@ -144,65 +127,27 @@ void main() {
     vec3 outColor;
 
     if (u_wide_gamut_mode == 1) {
-        // --- Perceptual Color Pipeline (Symmetrical OKLCH Gamut Master) ---
-        vec3 linRGB = sRGBToLinear(rgb);
+        vec3 linColor = sRGBToLinear(rgb);
 
-        // 1. Pure Direct Linear RGB to OKLab:
-        vec3 lms = kLinRGBToLMS * linRGB;
-        vec3 lms_ = pow(max(lms, vec3(0.0)), vec3(1.0 / 3.0));
-        vec3 lab = kLMSToOKLab * lms_;
+        // Colorimetrically exact sRGB -> Display P3 mapping (D65 aligned)
+        vec3 p3Accurate = kLinearSRGBToLinearP3 * linColor;
 
-        float L = lab.x;
-        float C = length(lab.yz);
-
-        // [Punto Dulce HDR F1-Style v1.80] Specular Highlight Punch (Peak 1.0 Brilliance):
-        // Normal colors stay natural; lights, lasers, and flashes reach 100% white brilliance
-        if (L > 0.52) {
-            float over = (L - 0.52) / 0.48;
-            L = 0.52 + over * 0.48 * (1.0 + 0.12 * over * (1.0 - over));
-            lab.x = clamp(L, 0.0, 1.0);
+        vec3 finalLinear;
+        if (u_color_profile == 1) {
+            // Vivid Mode (u_color_profile == 1, Default):
+            // Controlled 20% expansion into Display P3 wide gamut, maintaining
+            // 80% colorimetric fidelity to original Winamp CRT colors.
+            // Prevents oversaturation, color burning, and highlight clipping while
+            // taking advantage of OLED wide-gamut richness.
+            finalLinear = mix(p3Accurate, linColor, 0.20);
+        } else {
+            // Natural Mode (u_color_profile == 0):
+            // 100% faithful to original Winamp CRT sRGB color space.
+            finalLinear = p3Accurate;
         }
 
-        // [Punto Dulce HDR F1-Style v1.80] Radiant White Specular Roll-off (Abney Effect):
-        // Extremely bright lights naturally roll off into brilliant radiant white cores
-        float highlightWhiteRollOff = 1.0;
-        if (L > 0.60) {
-            float hlFactor = clamp((L - 0.60) / 0.40, 0.0, 1.0);
-            highlightWhiteRollOff = 1.0 - 0.45 * (hlFactor * hlFactor);
-        }
-
-        if (C > 1e-6) {
-            // Display P3 Vibrance Boost (Vivid = 0.035, Natural = 0.015)
-            float maxBoost = (u_color_profile == 1) ? 0.035 : 0.015;
-
-            // Saturation Protection: Protect already rich hues from clipping
-            float satProtection = clamp(1.0 - max(0.0, C - 0.12) / 0.10, 0.0, 1.0);
-            float boost = maxBoost * satProtection * (C / (C + 0.04));
-
-            float chromaScale = 1.0 + boost;
-
-            // Radiance desaturation for bright highlights:
-            chromaScale *= highlightWhiteRollOff;
-
-            // Clean shadow toe (prevents chroma noise on deep darks):
-            if (L < 0.010) {
-                chromaScale *= smoothstep(0.001, 0.010, L);
-            }
-
-            lab.yz *= chromaScale;
-        }
-
-        // Transform from OKLab to Linear RGB:
-        vec3 lmsBack = kOKLabToLMS * lab;
-        vec3 linColor = kLMSToLinearRGB * (lmsBack * lmsBack * lmsBack);
-
-        // Cinema Soft-Knee Gamut Compression (preserving specular dynamic range up to 0.95):
-        float thresh = 0.95;
-        vec3 excess = max(linColor - vec3(thresh), vec3(0.0));
-        linColor = min(linColor, vec3(thresh)) + (1.0 - thresh) * (excess / (vec3(1.0) + excess * 2.0));
-
-        // Display Gamma Encode:
-        outColor = linearToSRGB(linColor);
+        finalLinear = clamp(finalLinear, 0.0, 1.0);
+        outColor = linearToSRGB(finalLinear);
     } else {
         outColor = rgb;
     }
