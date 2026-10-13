@@ -30,11 +30,6 @@ static std::string BuildDefaultCompositeShader(const PresetState& presetState)
         code += "    ret = tex2D(sampler_main, uv).xyz;\n";
     }
 
-    if (std::abs(presetState.gammaAdj - 1.0f) > 0.001f)
-    {
-        code += "    ret = saturate(ret * " + std::to_string(presetState.gammaAdj) + ");\n";
-    }
-
     if (presetState.shader >= 1.0f)
     {
         code += "    ret = saturate(ret * hue_shader);\n";
@@ -47,7 +42,7 @@ static std::string BuildDefaultCompositeShader(const PresetState& presetState)
 
     if (presetState.brighten)
     {
-        code += "    ret = saturate(sqrt(ret));\n";
+        code += "    ret = saturate(ret * (2.0 - ret));\n";
     }
     if (presetState.darken)
     {
@@ -60,6 +55,11 @@ static std::string BuildDefaultCompositeShader(const PresetState& presetState)
     if (presetState.invert)
     {
         code += "    ret = saturate(1.0 - ret);\n";
+    }
+
+    if (std::abs(presetState.gammaAdj - 1.0f) > 0.001f)
+    {
+        code += "    ret = saturate(ret * " + std::to_string(presetState.gammaAdj) + ");\n";
     }
 
     code += "    ret = saturate(ret);\n";
