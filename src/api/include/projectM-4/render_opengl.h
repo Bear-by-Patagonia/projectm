@@ -49,6 +49,20 @@ PROJECTM_EXPORT void projectm_opengl_render_frame(projectm_handle instance);
 PROJECTM_EXPORT void projectm_opengl_render_frame_fbo(projectm_handle instance, uint32_t framebuffer_object_id);
 
 /**
+ * @brief Renders a single frame to the specified framebuffer object with custom target viewport size.
+ *
+ * @param instance The projectM instance handle.
+ * @param framebuffer_object_id The ID of the framebuffer to render to, or 0 for the default backbuffer.
+ * @param target_width The target viewport width in pixels.
+ * @param target_height The target viewport height in pixels.
+ * @since 4.2.1
+ */
+PROJECTM_EXPORT void projectm_opengl_render_frame_fbo_viewport(projectm_handle instance,
+                                                              uint32_t framebuffer_object_id,
+                                                              int target_width,
+                                                              int target_height);
+
+/**
  * @brief Burn-in the provided texture into the active preset(s) main texture.
  *
  * During transitions, the image is drawn onto both active presets.

@@ -120,7 +120,7 @@ public:
      */
     void SetTextureLoadCallback(Renderer::TextureLoadCallback callback);
 
-    void RenderFrame(uint32_t targetFramebufferObject = 0);
+    void RenderFrame(uint32_t targetFramebufferObject = 0, int targetViewportWidth = 0, int targetViewportHeight = 0);
 
     /**
      * @brief Sets a user-specified time for rendering the next frame

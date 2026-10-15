@@ -113,7 +113,7 @@ void ProjectM::SetTextureLoadCallback(Renderer::TextureLoadCallback callback)
     }
 }
 
-void ProjectM::RenderFrame(uint32_t targetFramebufferObject /*= 0*/)
+void ProjectM::RenderFrame(uint32_t targetFramebufferObject /*= 0*/, int targetViewportWidth /*= 0*/, int targetViewportHeight /*= 0*/)
 {
     // Don't render if window area is zero.
     if (m_windowWidth == 0 || m_windowHeight == 0)
@@ -190,7 +190,9 @@ void ProjectM::RenderFrame(uint32_t targetFramebufferObject /*= 0*/)
     m_activePreset->RenderFrame(audioData, renderContext);
 
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(targetFramebufferObject));
-    glViewport(0, 0, renderContext.viewportSizeX, renderContext.viewportSizeY);
+    int const outVpWidth = (targetViewportWidth > 0) ? targetViewportWidth : renderContext.viewportSizeX;
+    int const outVpHeight = (targetViewportHeight > 0) ? targetViewportHeight : renderContext.viewportSizeY;
+    glViewport(0, 0, outVpWidth, outVpHeight);
 
 #ifdef USE_GLES
     // On WebGL2 / Chrome ANGLE, the default framebuffer's draw buffer must

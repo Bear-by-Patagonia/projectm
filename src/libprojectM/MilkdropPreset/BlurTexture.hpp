@@ -65,6 +65,11 @@ public:
     void SetRequiredBlurLevel(BlurLevel level);
 
     /**
+     * @brief Returns the minimum blur level required by the active preset shaders.
+     */
+    BlurLevel GetRequiredBlurLevel() const noexcept { return m_blurLevel; }
+
+    /**
      * @brief Returns a list of descriptors for the given blur level.
      * The blur textures don't need to be present and can be empty placeholders.
      * @param blurLevel The blur level.
