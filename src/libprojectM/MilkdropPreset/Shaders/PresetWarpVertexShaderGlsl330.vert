@@ -27,10 +27,23 @@ uniform float warpScaleInverse;
 uniform vec4 warpFactors;
 uniform vec2 texelOffset;
 uniform float decay;
+uniform int u_curlNoise;
 
 out vec4 frag_COLOR;
 out vec4 frag_TEXCOORD0;
 out vec2 frag_TEXCOORD1;
+
+// Multi-octave Analytical Divergence-Free Curl Noise: div v == 0 (Incompressible fluid vortex)
+vec2 getAnalyticalCurlNoise(vec2 p, float t) {
+    float c1 = cos(p.y * 2.1 + t * 0.7);
+    float s1 = sin(p.x * 2.1 + t * 0.7);
+    float c2 = cos(p.y * 4.3 - t * 1.1);
+    float s2 = sin(p.x * 4.3 - t * 1.1);
+    float c3 = cos(p.y * 8.7 + t * 1.6);
+    float s3 = sin(p.x * 8.7 + t * 1.6);
+    return vec2(c1 * 0.5 + c2 * 0.3 + c3 * 0.2,
+               -(s1 * 0.5 + s2 * 0.3 + s3 * 0.2));
+}
 
 void main() {
     gl_Position = vertex_transformation * vec4(pos, 0.0, 1.0);
@@ -50,11 +63,17 @@ void main() {
     u = (u - warp_center.x) / stretch.x + warp_center.x;
     v = (v - warp_center.y) / stretch.y + warp_center.y;
 
-    // Warping
-    u += warp * 0.0035 * sin(warpTime * 0.333 + warpScaleInverse * (pos.x * warpFactors.x - pos.y * warpFactors.w));
-    v += warp * 0.0035 * cos(warpTime * 0.375 - warpScaleInverse * (pos.x * warpFactors.z + pos.y * warpFactors.y));
-    u += warp * 0.0035 * cos(warpTime * 0.753 - warpScaleInverse * (pos.x * warpFactors.y - pos.y * warpFactors.z));
-    v += warp * 0.0035 * sin(warpTime * 0.825 + warpScaleInverse * (pos.x * warpFactors.x + pos.y * warpFactors.w));
+    // Warping: Analytical Curl Noise vs Classic Trigonometric Approximation
+    if (u_curlNoise != 0) {
+        vec2 curl = getAnalyticalCurlNoise(pos * warpScaleInverse * 0.8, warpTime * 0.4);
+        u += warp * 0.012 * curl.x;
+        v += warp * 0.012 * curl.y;
+    } else {
+        u += warp * 0.0035 * sin(warpTime * 0.333 + warpScaleInverse * (pos.x * warpFactors.x - pos.y * warpFactors.w));
+        v += warp * 0.0035 * cos(warpTime * 0.375 - warpScaleInverse * (pos.x * warpFactors.z + pos.y * warpFactors.y));
+        u += warp * 0.0035 * cos(warpTime * 0.753 - warpScaleInverse * (pos.x * warpFactors.y - pos.y * warpFactors.z));
+        v += warp * 0.0035 * sin(warpTime * 0.825 + warpScaleInverse * (pos.x * warpFactors.x + pos.y * warpFactors.w));
+    }
 
     // Rotation
     float u2 = u - warp_center.x;

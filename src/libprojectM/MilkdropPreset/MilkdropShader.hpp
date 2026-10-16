@@ -87,6 +87,26 @@ public:
      */
     static bool IsFp16PrecisionEnabled();
 
+    /**
+     * @brief Enables or disables analytical curl noise for fluid warp simulation.
+     */
+    static void SetCurlNoiseEnabled(bool enabled);
+
+    /**
+     * @brief Checks whether analytical curl noise mode is enabled.
+     */
+    static bool IsCurlNoiseEnabled();
+
+    /**
+     * @brief Enables or disables 4-tap Catmull-Rom bicubic texture filtering in warp feedback loop.
+     */
+    static void SetCatmullRomEnabled(bool enabled);
+
+    /**
+     * @brief Checks whether 4-tap Catmull-Rom bicubic filtering is enabled.
+     */
+    static bool IsCatmullRomEnabled();
+
 private:
     /**
      * @brief Prepares the shader code to be translated into GLSL.

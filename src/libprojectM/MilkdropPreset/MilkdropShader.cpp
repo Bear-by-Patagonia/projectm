@@ -23,6 +23,8 @@ using libprojectM::MilkdropPreset::MilkdropStaticShaders;
 
 static bool s_hdrPeakModeEnabled = true;
 static bool s_fp16PrecisionEnabled = false;
+static bool s_curlNoiseEnabled = false;
+static bool s_catmullRomEnabled = false;
 
 void MilkdropShader::SetHdrPeakModeEnabled(bool enabled)
 {
@@ -42,6 +44,26 @@ void MilkdropShader::SetFp16PrecisionEnabled(bool enabled)
 bool MilkdropShader::IsFp16PrecisionEnabled()
 {
     return s_fp16PrecisionEnabled;
+}
+
+void MilkdropShader::SetCurlNoiseEnabled(bool enabled)
+{
+    s_curlNoiseEnabled = enabled;
+}
+
+bool MilkdropShader::IsCurlNoiseEnabled()
+{
+    return s_curlNoiseEnabled;
+}
+
+void MilkdropShader::SetCatmullRomEnabled(bool enabled)
+{
+    s_catmullRomEnabled = enabled;
+}
+
+bool MilkdropShader::IsCatmullRomEnabled()
+{
+    return s_catmullRomEnabled;
 }
 
 static auto floatRand = []() { return static_cast<float>(rand() % 7381) / 7380.0f; };
@@ -290,6 +312,9 @@ void MilkdropShader::LoadVariables(const PresetState& presetState, const PerFram
             m_shader.SetUniformFloat4(m_locQ[i], presetState.uniformCache.qValues[i]);
         }
     }
+
+    m_shader.SetUniformInt("u_curlNoise", s_curlNoiseEnabled ? 1 : 0);
+    m_shader.SetUniformInt("u_catmullRom", s_catmullRomEnabled ? 1 : 0);
 
     // Bind all texture and sampler descriptors. This includes the main and blur textures.
     GLint textureUnit{0};
@@ -743,6 +768,49 @@ void MilkdropShader::TranspileHLSLShader(const PresetState& presetState, std::st
             glslResult.replace(pos, highpSampler.length(), medpSampler);
         }
         LOG_INFO("[MilkdropShader] Dynamic FP16 (mediump) precision engaged for " + shaderTypeString + " shader");
+    }
+
+    if (s_catmullRomEnabled && m_type == ShaderType::WarpShader)
+    {
+        const std::string bicubicFunc = R"(
+vec4 sampleCatmullRom4Tap(sampler2D tex, vec2 uv) {
+    vec2 ts = vec2(textureSize(tex, 0));
+    vec2 its = 1.0 / ts;
+    vec2 sp = uv * ts;
+    vec2 tc = floor(sp - 0.5) + 0.5;
+    vec2 f = sp - tc;
+    vec2 f2 = f * f;
+    vec2 f3 = f2 * f;
+    vec2 w0 = f2 - 0.5 * (f3 + f);
+    vec2 w1 = 1.5 * f3 - 2.5 * f2 + 1.0;
+    vec2 w3 = 0.5 * (f3 - f2);
+    vec2 w2 = 1.0 - w0 - w1 - w3;
+    vec2 s0 = w0 + w1;
+    vec2 s1 = w2 + w3;
+    vec2 f0 = w1 / s0;
+    vec2 f1 = w3 / s1;
+    vec2 t0 = (tc - 1.0 + f0) * its;
+    vec2 t1 = (tc + 1.0 + f1) * its;
+    return (texture(tex, vec2(t0.x, t0.y)) * (s0.x * s0.y) +
+            texture(tex, vec2(t1.x, t0.y)) * (s1.x * s0.y) +
+            texture(tex, vec2(t0.x, t1.y)) * (s0.x * s1.y) +
+            texture(tex, vec2(t1.x, t1.y)) * (s1.x * s1.y));
+}
+)";
+        size_t mainPos = glslResult.find("void main()");
+        if (mainPos != std::string::npos)
+        {
+            glslResult.insert(mainPos, bicubicFunc);
+            const std::string target = "texture(sampler_main,";
+            const std::string replacement = "sampleCatmullRom4Tap(sampler_main,";
+            size_t pos = 0;
+            while ((pos = glslResult.find(target, pos)) != std::string::npos)
+            {
+                glslResult.replace(pos, target.length(), replacement);
+                pos += replacement.length();
+            }
+            LOG_INFO("[MilkdropShader] Catmull-Rom 4-Tap bicubic advection injected for warp shader");
+        }
     }
 
     LOG_TRACE("[MilkdropShader] Transpiled GLSL " + shaderTypeString + " shader code:\n" + glslResult);

@@ -156,8 +156,11 @@ void PerPixelMesh::InitializeMesh(const PresetState& presetState)
             const float y = static_cast<float>(gridY) / static_cast<float>(m_gridSizeY) * 2.0f - 1.0f;
             vertices[vertexIndex] = {x, y};
 
-            // Milkdrop uses sqrtf, but hypotf is probably safer.
-            m_radiusAngleBuffer[vertexIndex].radius = hypotf(x * aspectX, y * aspectY);
+            const float r = hypotf(x * aspectX, y * aspectY);
+            // Conformal Logarithmic / Hyperbolic radial transformation:
+            // r_conf = ln(1.0 + r * (e - 1.0)) smoothly maps [0, 1] to [0, 1] while enhancing
+            // central angular fidelity and preventing edge distortion pinch with 0 GPU overhead.
+            m_radiusAngleBuffer[vertexIndex].radius = std::log1p(r * 1.718281828f);
             if (gridY == m_gridSizeY / 2 && gridX == m_gridSizeX / 2)
             {
                 m_radiusAngleBuffer[vertexIndex].angle = 0.0f;
@@ -327,6 +330,8 @@ void PerPixelMesh::WarpedBlit(const PresetState& presetState,
         perPixelMeshShader->SetUniformFloat4("warpFactors", warpFactors);
         perPixelMeshShader->SetUniformFloat2("texelOffset", texelOffsets);
         perPixelMeshShader->SetUniformFloat("decay", decay);
+        perPixelMeshShader->SetUniformInt("u_curlNoise", MilkdropShader::IsCurlNoiseEnabled() ? 1 : 0);
+        perPixelMeshShader->SetUniformInt("u_catmullRom", MilkdropShader::IsCatmullRomEnabled() ? 1 : 0);
     }
     else
     {

@@ -42,7 +42,8 @@ static std::string BuildDefaultCompositeShader(const PresetState& presetState)
 
     if (presetState.brighten)
     {
-        code += "    ret = saturate(ret * (2.0 - ret));\n";
+        // Filmic Sigmoid Brighten: soft-knee expansion that prevents flat saturation clipping
+        code += "    ret = (ret * (1.0 + 0.5 * ret)) / (1.0 + 0.35 * ret);\n";
     }
     if (presetState.darken)
     {
@@ -62,6 +63,9 @@ static std::string BuildDefaultCompositeShader(const PresetState& presetState)
         code += "    ret = saturate(ret * " + std::to_string(presetState.gammaAdj) + ");\n";
     }
 
+    // Extended Filmic Sigmoidal Compression:
+    // Preserves vibrant chromatic saturation at audio peaks without chalky highlight blowout
+    code += "    ret = (ret * (1.0 + 0.12 * ret)) / (1.0 + 0.72 * ret);\n";
     code += "    ret = saturate(ret);\n";
     code += "}\n";
     return code;

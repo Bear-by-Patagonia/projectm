@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <chrono>
 #include <random>
 
@@ -132,6 +133,8 @@ private:
     int m_presetFrameB{};
 
     bool m_isSmoothing{false};
+    std::array<double, 4> m_dtHistory{1.0 / 60.0, 1.0 / 60.0, 1.0 / 60.0, 1.0 / 60.0};
+    bool m_hasInitialDt{false};
 };
 
 } // namespace libprojectM

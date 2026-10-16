@@ -124,6 +124,34 @@ PROJECTM_EXPORT bool projectm_opengl_get_fp16_precision();
  */
 PROJECTM_EXPORT void projectm_opengl_recompile_preset_shaders(projectm_handle instance);
 
+/**
+ * @brief Enables or disables analytical incompressible curl noise for fluid warp simulation.
+ * @param enabled True to enable curl noise, false for classic trigonometric warp.
+ * @since 4.2.3
+ */
+PROJECTM_EXPORT void projectm_opengl_set_curl_noise(bool enabled);
+
+/**
+ * @brief Returns whether analytical curl noise mode is currently enabled.
+ * @return True if curl noise is enabled.
+ * @since 4.2.3
+ */
+PROJECTM_EXPORT bool projectm_opengl_get_curl_noise();
+
+/**
+ * @brief Enables or disables 4-tap Catmull-Rom bicubic texture filtering in warp feedback loop.
+ * @param enabled True to use 4-tap Catmull-Rom bicubic sampling, false for standard bilinear.
+ * @since 4.2.3
+ */
+PROJECTM_EXPORT void projectm_opengl_set_catmull_rom(bool enabled);
+
+/**
+ * @brief Returns whether Catmull-Rom bicubic sampling is currently enabled.
+ * @return True if Catmull-Rom is enabled.
+ * @since 4.2.3
+ */
+PROJECTM_EXPORT bool projectm_opengl_get_catmull_rom();
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
