@@ -261,6 +261,16 @@ bool projectm_opengl_get_hdr_peak_mode()
     return libprojectM::MilkdropPreset::MilkdropShader::IsHdrPeakModeEnabled();
 }
 
+void projectm_opengl_set_fp16_precision(bool enabled)
+{
+    libprojectM::MilkdropPreset::MilkdropShader::SetFp16PrecisionEnabled(enabled);
+}
+
+bool projectm_opengl_get_fp16_precision()
+{
+    return libprojectM::MilkdropPreset::MilkdropShader::IsFp16PrecisionEnabled();
+}
+
 void projectm_set_frame_time(projectm_handle instance, double seconds_since_first_frame)
 {
     auto projectMInstance = handle_to_instance(instance);

@@ -96,6 +96,26 @@ PROJECTM_EXPORT void projectm_opengl_set_hdr_peak_mode(bool enabled);
  */
 PROJECTM_EXPORT bool projectm_opengl_get_hdr_peak_mode();
 
+/**
+ * @brief Enables or disables FP16 (mediump) float precision in Milkdrop preset shaders.
+ *
+ * When enabled (FP16), complex presets execute with 2x ALU throughput and reduced register pressure
+ * on mobile/TV GPUs (e.g. Mali-G31), rescuing framerates below 27 FPS.
+ * When disabled (FP32), maximum mathematical precision is preserved.
+ *
+ * @param enabled True to use FP16 (mediump), false for FP32 (highp).
+ * @since 4.2.2
+ */
+PROJECTM_EXPORT void projectm_opengl_set_fp16_precision(bool enabled);
+
+/**
+ * @brief Returns whether FP16 precision mode is currently enabled.
+ *
+ * @return True if FP16 precision is enabled, false if FP32.
+ * @since 4.2.2
+ */
+PROJECTM_EXPORT bool projectm_opengl_get_fp16_precision();
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

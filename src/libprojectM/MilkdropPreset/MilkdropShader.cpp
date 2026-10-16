@@ -22,6 +22,7 @@ namespace MilkdropPreset {
 using libprojectM::MilkdropPreset::MilkdropStaticShaders;
 
 static bool s_hdrPeakModeEnabled = true;
+static bool s_fp16PrecisionEnabled = false;
 
 void MilkdropShader::SetHdrPeakModeEnabled(bool enabled)
 {
@@ -31,6 +32,16 @@ void MilkdropShader::SetHdrPeakModeEnabled(bool enabled)
 bool MilkdropShader::IsHdrPeakModeEnabled()
 {
     return s_hdrPeakModeEnabled;
+}
+
+void MilkdropShader::SetFp16PrecisionEnabled(bool enabled)
+{
+    s_fp16PrecisionEnabled = enabled;
+}
+
+bool MilkdropShader::IsFp16PrecisionEnabled()
+{
+    return s_fp16PrecisionEnabled;
 }
 
 static auto floatRand = []() { return static_cast<float>(rand() % 7381) / 7380.0f; };
@@ -710,17 +721,38 @@ void MilkdropShader::TranspileHLSLShader(const PresetState& presetState, std::st
         throw Renderer::ShaderException("[MilkdropShader] Error translating HLSL " + shaderTypeString + " shader: GLSL generating failed.\nSource:\n" + sourcePreprocessed);
     }
 
-    LOG_TRACE("[MilkdropShader] Transpiled GLSL " + shaderTypeString + " shader code:\n" + std::string(generator.GetResult()));
+    std::string glslResult = generator.GetResult();
+    if (s_fp16PrecisionEnabled)
+    {
+        const std::string highpFloat = "precision highp float;";
+        const std::string medpFloat = "precision mediump float;";
+        size_t pos = glslResult.find(highpFloat);
+        if (pos != std::string::npos)
+        {
+            glslResult.replace(pos, highpFloat.length(), medpFloat);
+        }
+
+        const std::string highpSampler = "precision highp sampler3D;";
+        const std::string medpSampler = "precision mediump sampler3D;";
+        pos = glslResult.find(highpSampler);
+        if (pos != std::string::npos)
+        {
+            glslResult.replace(pos, highpSampler.length(), medpSampler);
+        }
+        LOG_INFO("[MilkdropShader] Dynamic FP16 (mediump) precision engaged for " + shaderTypeString + " shader");
+    }
+
+    LOG_TRACE("[MilkdropShader] Transpiled GLSL " + shaderTypeString + " shader code:\n" + glslResult);
 
     // Now we have GLSL source for the preset shader program (hopefully it's valid!)
     // Compile the preset shader fragment shader with the standard vertex shader and cross our fingers.
     if (m_type == ShaderType::WarpShader)
     {
-        m_shader.CompileProgram(MilkdropStaticShaders::Get()->GetPresetWarpVertexShader(), generator.GetResult());
+        m_shader.CompileProgram(MilkdropStaticShaders::Get()->GetPresetWarpVertexShader(), glslResult.c_str());
     }
     else
     {
-        m_shader.CompileProgram(MilkdropStaticShaders::Get()->GetPresetCompVertexShader(), generator.GetResult());
+        m_shader.CompileProgram(MilkdropStaticShaders::Get()->GetPresetCompVertexShader(), glslResult.c_str());
     }
 
     CacheUniformLocations();

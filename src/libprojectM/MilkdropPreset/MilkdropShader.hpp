@@ -77,6 +77,16 @@ public:
      */
     static bool IsHdrPeakModeEnabled();
 
+    /**
+     * @brief Enables or disables FP16 (mediump) precision for Milkdrop preset shaders.
+     */
+    static void SetFp16PrecisionEnabled(bool enabled);
+
+    /**
+     * @brief Checks whether FP16 precision mode is enabled.
+     */
+    static bool IsFp16PrecisionEnabled();
+
 private:
     /**
      * @brief Prepares the shader code to be translated into GLSL.
