@@ -204,6 +204,12 @@ void MilkdropPreset::BindFramebuffer()
     }
 }
 
+void MilkdropPreset::RecompileShaders()
+{
+    m_perPixelMesh.CompileWarpShader(m_state);
+    m_finalComposite.CompileCompositeShader(m_state);
+}
+
 void MilkdropPreset::PerFrameUpdate()
 {
     m_perFrameContext.LoadStateVariables(m_state);

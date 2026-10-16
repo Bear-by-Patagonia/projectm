@@ -116,6 +116,14 @@ PROJECTM_EXPORT void projectm_opengl_set_fp16_precision(bool enabled);
  */
 PROJECTM_EXPORT bool projectm_opengl_get_fp16_precision();
 
+/**
+ * @brief Hot-recompiles warp and composite shaders of the active preset in-place without reloading.
+ *
+ * @param instance The projectM instance handle.
+ * @since 4.2.2
+ */
+PROJECTM_EXPORT void projectm_opengl_recompile_preset_shaders(projectm_handle instance);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

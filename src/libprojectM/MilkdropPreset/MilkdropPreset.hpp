@@ -86,6 +86,8 @@ public:
 
     void BindFramebuffer() override;
 
+    void RecompileShaders() override;
+
 private:
     void PerFrameUpdate();
 

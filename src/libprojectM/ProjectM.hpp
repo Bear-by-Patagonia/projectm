@@ -123,6 +123,11 @@ public:
     void RenderFrame(uint32_t targetFramebufferObject = 0, int targetViewportWidth = 0, int targetViewportHeight = 0);
 
     /**
+     * @brief Hot-recompiles warp and composite shaders of the active preset in-place.
+     */
+    void RecompilePresetShaders();
+
+    /**
      * @brief Sets a user-specified time for rendering the next frame
      * Negative values will make projectM use the system clock instead.
      * @param secondsSinceStart Fractional seconds since rendering the first frame.

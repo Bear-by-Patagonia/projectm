@@ -100,6 +100,9 @@ void MilkdropShader::LoadTexturesAndCompile(PresetState& presetState)
 {
     std::locale loc;
 
+    m_mainTextureDescriptors.clear();
+    m_textureSamplerDescriptors.clear();
+
     // Now request the textures and descriptors from the texture manager.
     for (const auto& name : m_samplerNames)
     {

@@ -60,6 +60,11 @@ public:
      */
     virtual void BindFramebuffer() = 0;
 
+    /**
+     * @brief Hot-recompiles warp and composite shaders in-place (e.g. for precision switching).
+     */
+    virtual void RecompileShaders() {}
+
     inline void SetFilename(const std::string& filename)
     {
         m_filename = filename;

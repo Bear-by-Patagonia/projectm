@@ -221,6 +221,14 @@ void ProjectM::RenderFrame(uint32_t targetFramebufferObject /*= 0*/, int targetV
     m_previousFrameVolume = audioData.vol;
 }
 
+void ProjectM::RecompilePresetShaders()
+{
+    if (m_activePreset)
+    {
+        m_activePreset->RecompileShaders();
+    }
+}
+
 void ProjectM::Initialize()
 {
     // Check OpenGL first before allocating any additional memory.

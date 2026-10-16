@@ -271,6 +271,12 @@ bool projectm_opengl_get_fp16_precision()
     return libprojectM::MilkdropPreset::MilkdropShader::IsFp16PrecisionEnabled();
 }
 
+void projectm_opengl_recompile_preset_shaders(projectm_handle instance)
+{
+    auto projectMInstance = handle_to_instance(instance);
+    projectMInstance->RecompilePresetShaders();
+}
+
 void projectm_set_frame_time(projectm_handle instance, double seconds_since_first_frame)
 {
     auto projectMInstance = handle_to_instance(instance);
