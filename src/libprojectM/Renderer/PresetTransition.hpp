@@ -56,7 +56,9 @@ public:
               const Preset& newPreset,
               const RenderContext& context,
               const Audio::FrameAudioData& audioData,
-              double currentFrameTime);
+              double currentFrameTime,
+              int targetViewportWidth = 0,
+              int targetViewportHeight = 0);
 
 private:
     std::vector<std::string> m_noiseTextureNames{"noise_lq",

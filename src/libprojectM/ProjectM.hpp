@@ -302,6 +302,8 @@ private:
     uint32_t m_targetFps{35};        //!< Target frames per second.
     uint32_t m_windowWidth{0};       //!< EvaluateFrameData window width. If 0, nothing is rendered.
     uint32_t m_windowHeight{0};      //!< EvaluateFrameData window height. If 0, nothing is rendered.
+    int m_displayTargetWidth{0};     //!< Native surface target display width for screen presentation
+    int m_displayTargetHeight{0};    //!< Native surface target display height for screen presentation
     double m_presetDuration{30.0};   //!< Preset duration in seconds.
     double m_softCutDuration{3.0};   //!< Soft cut transition time.
     double m_hardCutDuration{20.0};  //!< Time after which a hard cut can happen at the earliest.

@@ -190,8 +190,15 @@ void ProjectM::RenderFrame(uint32_t targetFramebufferObject /*= 0*/, int targetV
     m_activePreset->RenderFrame(audioData, renderContext);
 
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(targetFramebufferObject));
-    int const outVpWidth = (targetViewportWidth > 0) ? targetViewportWidth : renderContext.viewportSizeX;
-    int const outVpHeight = (targetViewportHeight > 0) ? targetViewportHeight : renderContext.viewportSizeY;
+    if (targetViewportWidth > 0 && targetFramebufferObject == 0)
+    {
+        m_displayTargetWidth = targetViewportWidth;
+        m_displayTargetHeight = targetViewportHeight;
+    }
+    int const outVpWidth = (targetViewportWidth > 0) ? targetViewportWidth :
+                           (targetFramebufferObject == 0 && m_displayTargetWidth > 0) ? m_displayTargetWidth : renderContext.viewportSizeX;
+    int const outVpHeight = (targetViewportHeight > 0) ? targetViewportHeight :
+                            (targetFramebufferObject == 0 && m_displayTargetHeight > 0) ? m_displayTargetHeight : renderContext.viewportSizeY;
     glViewport(0, 0, outVpWidth, outVpHeight);
 
 #ifdef USE_GLES
@@ -207,7 +214,7 @@ void ProjectM::RenderFrame(uint32_t targetFramebufferObject /*= 0*/, int targetV
 
     if (m_transition != nullptr && m_transitioningPreset != nullptr)
     {
-        m_transition->Draw(*m_activePreset, *m_transitioningPreset, renderContext, audioData, m_timeKeeper->GetFrameTime());
+        m_transition->Draw(*m_activePreset, *m_transitioningPreset, renderContext, audioData, m_timeKeeper->GetFrameTime(), outVpWidth, outVpHeight);
     }
     else
     {

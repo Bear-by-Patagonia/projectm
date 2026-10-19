@@ -46,12 +46,17 @@ void PresetTransition::Draw(const Preset& oldPreset,
                             const Preset& newPreset,
                             const RenderContext& context,
                             const libprojectM::Audio::FrameAudioData& audioData,
-                            double currentFrameTime)
+                            double currentFrameTime,
+                            int targetViewportWidth,
+                            int targetViewportHeight)
 {
     if (m_transitionShader == nullptr)
     {
         return;
     }
+
+    float const vpW = (targetViewportWidth > 0) ? static_cast<float>(targetViewportWidth) : static_cast<float>(context.viewportSizeX);
+    float const vpH = (targetViewportHeight > 0) ? static_cast<float>(targetViewportHeight) : static_cast<float>(context.viewportSizeY);
 
     std::mt19937 rand32(m_randomDevice());
 
@@ -72,10 +77,9 @@ void PresetTransition::Draw(const Preset& oldPreset,
 
     m_transitionShader->Bind();
 
-    // Numerical parameters
-    m_transitionShader->SetUniformFloat3("iResolution", {static_cast<float>(context.viewportSizeX),
-                                                         static_cast<float>(context.viewportSizeY),
-                                                         0.0f});
+    // Numerical parameters: use target presentation viewport (vpW, vpH)
+    // to guarantee full-screen coverage during transitions under DRS scaling
+    m_transitionShader->SetUniformFloat3("iResolution", {vpW, vpH, 0.0f});
 
     m_transitionShader->SetUniformFloat4("durationParams", {linearProgress,
                                                             cosineProgress,
