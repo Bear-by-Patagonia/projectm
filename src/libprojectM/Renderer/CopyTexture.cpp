@@ -147,18 +147,13 @@ void main() {
     vec4 src;
 
     if (u_sub400p_aa == 1) {
-        // 2X Rotated Grid Super-Sampled (RGSS) reconstruction anti-aliasing filter:
-        // Smooths out jagged staircases on 3D raymarching geometry and procedural lines
-        // when scaling up from sub-400p to 1080p/4K backbuffer.
+        // Ultra-low bandwidth 2X Reconstruction Anti-Aliasing (2 diagonal taps):
+        // Reconstructs sub-pixel edges without saturating mobile memory bus (50% less texture bandwidth than 4-tap RGSS)
         vec2 texelSize = 1.0 / vec2(textureSize(texture_sampler, 0));
-        vec2 offA = vec2(-0.375, -0.125) * texelSize;
-        vec2 offB = vec2( 0.125, -0.375) * texelSize;
-        vec2 offC = vec2( 0.375,  0.125) * texelSize;
-        vec2 offD = vec2(-0.125,  0.375) * texelSize;
+        vec2 offA = vec2(-0.25, -0.25) * texelSize;
+        vec2 offB = vec2( 0.25,  0.25) * texelSize;
         src = (texture(texture_sampler, presentationUV + offA) +
-               texture(texture_sampler, presentationUV + offB) +
-               texture(texture_sampler, presentationUV + offC) +
-               texture(texture_sampler, presentationUV + offD)) * 0.25;
+               texture(texture_sampler, presentationUV + offB)) * 0.5;
     } else {
         src = texture(texture_sampler, presentationUV);
     }
