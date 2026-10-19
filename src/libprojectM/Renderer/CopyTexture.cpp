@@ -79,17 +79,16 @@ void CopyTexture::SetSub400pAntiAliasing(bool enabled)
 
 bool CopyTexture::IsSub400pAntiAliasingEnabled()
 {
-    return s_sub400pAntiAliasing.load(std::memory_order_relaxed);
+    return false;
 }
 
-extern "C" __attribute__((visibility("default"))) void projectm_opengl_set_sub400p_anti_aliasing(bool enabled)
+extern "C" __attribute__((visibility("default"))) void projectm_opengl_set_sub400p_anti_aliasing(bool /*enabled*/)
 {
-    CopyTexture::SetSub400pAntiAliasing(enabled);
 }
 
 extern "C" __attribute__((visibility("default"))) bool projectm_opengl_get_sub400p_anti_aliasing()
 {
-    return CopyTexture::IsSub400pAntiAliasingEnabled();
+    return false;
 }
 
 // Fast 1:1 Bit-Exact Passthrough Fragment Shader for Internal Feedback/Flip Passes
@@ -114,7 +113,6 @@ in vec2 fragment_tex_coord;
 uniform sampler2D texture_sampler;
 uniform int u_wide_gamut_mode;
 uniform int u_color_profile; // 0 = Natural, 1 = Vivid
-uniform int u_sub400p_aa;    // 0 = Normal bilinear, 1 = 2X MSAA/RGSS reconstruction filter
 
 out vec4 color;
 
@@ -141,22 +139,10 @@ const mat3 kLinearSRGBToLinearP3 = mat3(
 );
 
 void main() {
-    // --- Texture Fetch with optional 2X Rotated Grid Super-Sampling (RGSS) ---
+    // --- Single Texture Fetch ---
     // Filmic CRT Overscan Compensation (1.025x micro-expansion):
     vec2 presentationUV = (fragment_tex_coord - 0.5) / 1.025 + 0.5;
-    vec4 src;
-
-    if (u_sub400p_aa == 1) {
-        // Ultra-low bandwidth 2X Reconstruction Anti-Aliasing (2 diagonal taps):
-        // Reconstructs sub-pixel edges without saturating mobile memory bus (50% less texture bandwidth than 4-tap RGSS)
-        vec2 texelSize = 1.0 / vec2(textureSize(texture_sampler, 0));
-        vec2 offA = vec2(-0.25, -0.25) * texelSize;
-        vec2 offB = vec2( 0.25,  0.25) * texelSize;
-        src = (texture(texture_sampler, presentationUV + offA) +
-               texture(texture_sampler, presentationUV + offB)) * 0.5;
-    } else {
-        src = texture(texture_sampler, presentationUV);
-    }
+    vec4 src = texture(texture_sampler, presentationUV);
 
     vec3 rgb = clamp(src.rgb, 0.0, 1.0);
     vec3 outColor;
@@ -429,7 +415,6 @@ void CopyTexture::Copy(ShaderCache& shaderCache,
     if (m_isScreenPresentation) {
         shader->SetUniformInt("u_wide_gamut_mode", s_wideGamutEnabled.load(std::memory_order_relaxed) ? 1 : 0);
         shader->SetUniformInt("u_color_profile", s_colorProfile.load(std::memory_order_relaxed));
-        shader->SetUniformInt("u_sub400p_aa", s_sub400pAntiAliasing.load(std::memory_order_relaxed) ? 1 : 0);
     }
     shader->SetUniformMat4x4("vertex_transformation", flipMatrix);
 
@@ -459,7 +444,6 @@ void CopyTexture::Copy(ShaderCache& shaderCache,
     if (m_isScreenPresentation) {
         shader->SetUniformInt("u_wide_gamut_mode", s_wideGamutEnabled.load(std::memory_order_relaxed) ? 1 : 0);
         shader->SetUniformInt("u_color_profile", s_colorProfile.load(std::memory_order_relaxed));
-        shader->SetUniformInt("u_sub400p_aa", s_sub400pAntiAliasing.load(std::memory_order_relaxed) ? 1 : 0);
     }
     shader->SetUniformMat4x4("vertex_transformation", translationMatrix);
 
