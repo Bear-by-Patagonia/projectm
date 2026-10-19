@@ -150,7 +150,12 @@ PROJECTM_EXPORT void projectm_opengl_set_catmull_rom(bool enabled);
  * @return True if Catmull-Rom is enabled.
  * @since 4.2.3
  */
-PROJECTM_EXPORT bool projectm_opengl_get_catmull_rom();
+/**
+ * @brief Enables or disables 2X Rotated Grid Super-Sampled (RGSS) reconstruction anti-aliasing
+ * when dynamic resolution drops below 400p (< 10 FPS on heavy 3D presets).
+ */
+PROJECTM_EXPORT void projectm_opengl_set_sub400p_anti_aliasing(bool enabled);
+PROJECTM_EXPORT bool projectm_opengl_get_sub400p_anti_aliasing();
 
 #ifdef __cplusplus
 } // extern "C"

@@ -33,6 +33,13 @@ public:
     static int GetColorProfile();
 
     /**
+     * @brief Enables or disables 2X Rotated Grid Super-Sampled (RGSS) reconstruction anti-aliasing
+     * in the presentation pass when dynamic resolution drops below 400p (< 10 FPS).
+     */
+    static void SetSub400pAntiAliasing(bool enabled);
+    static bool IsSub400pAntiAliasingEnabled();
+
+    /**
      * @brief Marks this instance as the final presentation copier to the screen.
      * When true, applies Cinema Display P3 Remastering, 0-nit OLED black gating, and spatial dithering.
      * When false (default, e.g. internal preset flip filters), performs a pure 1:1 bit-exact texture copy.
