@@ -3,6 +3,7 @@
 #include "MilkdropPresetExceptions.hpp"
 
 #include <Logging.hpp>
+#include <cmath>
 
 #define REG_VAR(var) \
     var = projectm_eval_context_register_variable(perFrameCodeContext, #var);
@@ -178,7 +179,12 @@ void PerFrameContext::LoadStateVariables(PresetState& state)
         *q_vars[q] = q_values_after_init_code[q];
     }
     *progress = static_cast<PRJM_EVAL_F>(state.renderContext.progress);
-    *decay = static_cast<PRJM_EVAL_F>(state.decay);
+    double rawDecay = static_cast<double>(state.decay);
+    double instantFps = static_cast<double>(state.renderContext.fps);
+    if (instantFps > 1.0) {
+        rawDecay = std::pow(rawDecay, 60.0 / instantFps);
+    }
+    *decay = static_cast<PRJM_EVAL_F>(rawDecay);
     *wave_a = static_cast<PRJM_EVAL_F>(state.waveAlpha);
     *wave_r = static_cast<PRJM_EVAL_F>(state.waveR);
     *wave_g = static_cast<PRJM_EVAL_F>(state.waveG);

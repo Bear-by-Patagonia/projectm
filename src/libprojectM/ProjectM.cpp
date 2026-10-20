@@ -622,7 +622,8 @@ auto ProjectM::GetRenderContext() -> Renderer::RenderContext
     ctx.viewportSizeY = m_windowHeight;
     ctx.time = static_cast<float>(m_timeKeeper->GetRunningTime());
     ctx.progress = static_cast<float>(m_timeKeeper->PresetProgressA());
-    ctx.fps = static_cast<float>(m_targetFps);
+    double dt = m_timeKeeper->SecondsSinceLastFrame();
+    ctx.fps = (dt > 0.0001) ? static_cast<float>(1.0 / dt) : static_cast<float>(m_targetFps);
     ctx.frame = m_frameCount;
     ctx.aspectX = (m_windowHeight > m_windowWidth) ? static_cast<float>(m_windowWidth) / static_cast<float>(m_windowHeight) : 1.0f;
     ctx.aspectY = (m_windowWidth > m_windowHeight) ? static_cast<float>(m_windowHeight) / static_cast<float>(m_windowWidth) : 1.0f;
