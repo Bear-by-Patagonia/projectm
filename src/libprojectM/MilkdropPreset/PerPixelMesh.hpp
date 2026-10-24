@@ -131,6 +131,19 @@ private:
     std::weak_ptr<Renderer::Shader> m_perPixelMeshShader;             //!< Special shader which calculates the per-pixel UV coordinates.
     std::unique_ptr<MilkdropShader> m_warpShader;                     //!< The warp shader. Either preset-defined or a default shader.
     Renderer::Sampler m_perPixelSampler{GL_CLAMP_TO_EDGE, GL_LINEAR}; //!< The main texture sampler.
+
+    bool m_hasCachedUniforms{false};
+    int m_cachedTotalVertices{0};
+    float m_cachedZoom{0.0f};
+    float m_cachedZoomExp{0.0f};
+    float m_cachedRot{0.0f};
+    float m_cachedWarp{0.0f};
+    float m_cachedCx{0.0f};
+    float m_cachedCy{0.0f};
+    float m_cachedDx{0.0f};
+    float m_cachedDy{0.0f};
+    float m_cachedSx{0.0f};
+    float m_cachedSy{0.0f};
 };
 
 } // namespace MilkdropPreset

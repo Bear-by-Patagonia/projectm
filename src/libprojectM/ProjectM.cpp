@@ -88,10 +88,17 @@ void ProjectM::LoadPresetData(std::istream& presetData, bool smoothTransition)
 void ProjectM::SetTexturePaths(std::vector<std::string> texturePaths)
 {
     m_textureSearchPaths = std::move(texturePaths);
-    m_textureManager = std::make_unique<Renderer::TextureManager>(m_textureSearchPaths);
-    if (m_textureLoadCallback)
+    if (m_textureManager)
     {
-        m_textureManager->SetTextureLoadCallback(m_textureLoadCallback);
+        m_textureManager->SetTextureSearchPaths(m_textureSearchPaths);
+    }
+    else
+    {
+        m_textureManager = std::make_unique<Renderer::TextureManager>(m_textureSearchPaths);
+        if (m_textureLoadCallback)
+        {
+            m_textureManager->SetTextureLoadCallback(m_textureLoadCallback);
+        }
     }
 }
 
@@ -221,8 +228,11 @@ void ProjectM::RenderFrame(uint32_t targetFramebufferObject /*= 0*/, int targetV
         m_textureCopier->Draw(*renderContext.shaderCache, m_activePreset->OutputTexture(), false, false);
     }
 
-    // Draw user sprites
-    m_spriteManager->Draw(audioData, renderContext, targetFramebufferObject, {m_activePreset, m_transitioningPreset});
+    // Draw user sprites (skip vector allocation & shared_ptr refcount churn when no sprites are active)
+    if (m_spriteManager->ActiveSpriteCount() > 0)
+    {
+        m_spriteManager->Draw(audioData, renderContext, targetFramebufferObject, {m_activePreset, m_transitioningPreset});
+    }
 
     m_frameCount++;
     m_previousFrameVolume = audioData.vol;

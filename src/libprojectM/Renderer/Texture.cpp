@@ -159,7 +159,21 @@ void Texture::CreateNewTexture()
     switch (m_target)
     {
         case GL_TEXTURE_2D:
+#ifdef USE_GLES
+            if (m_width > 0 && m_height > 0)
+            {
+                GLenum sizedFormat = (m_internalFormat == GL_RGBA) ? GL_RGBA8 :
+                                     (m_internalFormat == GL_RGB)  ? GL_RGB8  :
+                                     static_cast<GLenum>(m_internalFormat);
+                glTexStorage2D(m_target, 1, sizedFormat, m_width, m_height);
+            }
+            else
+            {
+                glTexImage2D(m_target, 0, m_internalFormat, m_width, m_height, 0, m_format, m_type, nullptr);
+            }
+#else
             glTexImage2D(m_target, 0, m_internalFormat, m_width, m_height, 0, m_format, m_type, nullptr);
+#endif
             break;
         case GL_TEXTURE_3D:
             glTexImage3D(m_target, 0, m_internalFormat, m_width, m_height, m_depth, 0, m_format, m_type, nullptr);

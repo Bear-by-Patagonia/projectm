@@ -156,13 +156,17 @@ void MilkdropFFT::TimeToFrequencyDomain(const std::vector<float>& waveformData, 
     }
 
     // 1. Set up input to the FFT
-    std::vector<std::complex<float>> spectrumData(m_numFrequencies, std::complex<float>());
+    m_spectrumData.resize(m_numFrequencies);
     for (size_t i = 0; i < m_numFrequencies; i++)
     {
         size_t const idx{m_bitRevTable[i]};
         if (idx < m_samplesIn)
         {
-            spectrumData[i].real(waveformData[idx] * m_envelope[idx]);
+            m_spectrumData[i] = {waveformData[idx] * m_envelope[idx], 0.0f};
+        }
+        else
+        {
+            m_spectrumData[i] = {0.0f, 0.0f};
         }
     }
 
@@ -182,9 +186,9 @@ void MilkdropFFT::TimeToFrequencyDomain(const std::vector<float>& waveformData, 
             for (size_t i = m; i < m_numFrequencies; i += dftSize)
             {
                 size_t const j{i + hdftsize};
-                std::complex<float> const tempNum{spectrumData[j] * w};
-                spectrumData[j] = spectrumData[i] - tempNum;
-                spectrumData[i] = spectrumData[i] + tempNum;
+                std::complex<float> const tempNum{m_spectrumData[j] * w};
+                m_spectrumData[j] = m_spectrumData[i] - tempNum;
+                m_spectrumData[i] = m_spectrumData[i] + tempNum;
             }
 
             w *= wp;
@@ -198,7 +202,7 @@ void MilkdropFFT::TimeToFrequencyDomain(const std::vector<float>& waveformData, 
     spectralData.resize(m_numFrequencies / 2);
     for (size_t i = 0; i < m_numFrequencies / 2; i++)
     {
-        spectralData[i] = m_equalize[i] * std::abs(spectrumData[i]);
+        spectralData[i] = m_equalize[i] * std::abs(m_spectrumData[i]);
     }
 }
 

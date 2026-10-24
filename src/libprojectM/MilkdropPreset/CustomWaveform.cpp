@@ -137,8 +137,8 @@ void CustomWaveform::Draw(const PerFrameContext& presetPerFrameContext)
         sampleDataR[sample] *= mult;
     }
 
-    std::vector<Renderer::Point> points(sampleCount);
-    std::vector<Renderer::Color> colors(sampleCount);
+    m_points.resize(sampleCount);
+    m_colors.resize(sampleCount);
 
     float const sampleMultiplicator = sampleCount > 1 ? 1.0f / static_cast<float>(sampleCount - 1) : 0.0f;
     for (int sample = 0; sample < sampleCount; sample++)
@@ -148,16 +148,16 @@ void CustomWaveform::Draw(const PerFrameContext& presetPerFrameContext)
 
         m_perPointContext.ExecutePerPointCode();
 
-        points[sample] = Renderer::Point(static_cast<float>((*m_perPointContext.x * 2.0 - 1.0) * m_presetState.renderContext.invAspectX),
-                                         static_cast<float>((*m_perPointContext.y * -2.0 + 1.0) * m_presetState.renderContext.invAspectY));
+        m_points[sample] = Renderer::Point(static_cast<float>((*m_perPointContext.x * 2.0 - 1.0) * m_presetState.renderContext.invAspectX),
+                                           static_cast<float>((*m_perPointContext.y * -2.0 + 1.0) * m_presetState.renderContext.invAspectY));
 
-        colors[sample] = Renderer::Color::Modulo(Renderer::Color(static_cast<float>(*m_perPointContext.r),
-                                                                 static_cast<float>(*m_perPointContext.g),
-                                                                 static_cast<float>(*m_perPointContext.b),
-                                                                 static_cast<float>(*m_perPointContext.a)));
+        m_colors[sample] = Renderer::Color::Modulo(Renderer::Color(static_cast<float>(*m_perPointContext.r),
+                                                                   static_cast<float>(*m_perPointContext.g),
+                                                                   static_cast<float>(*m_perPointContext.b),
+                                                                   static_cast<float>(*m_perPointContext.a)));
     }
 
-    SmoothWave(points, colors);
+    SmoothWave(m_points, m_colors);
 
 #ifndef USE_GLES
     glDisable(GL_LINE_SMOOTH);
@@ -197,6 +197,7 @@ void CustomWaveform::Draw(const PerFrameContext& presetPerFrameContext)
         {
             case 0:
             default:
+                m_mesh.Update();
                 break;
 
             case 1:
@@ -204,6 +205,7 @@ void CustomWaveform::Draw(const PerFrameContext& presetPerFrameContext)
                 {
                     vertices[j].SetX(vertices[j].X() + incrementX);
                 }
+                m_mesh.Vertices().Update();
                 break;
 
             case 2:
@@ -211,6 +213,7 @@ void CustomWaveform::Draw(const PerFrameContext& presetPerFrameContext)
                 {
                     vertices[j].SetY(vertices[j].Y() + incrementY);
                 }
+                m_mesh.Vertices().Update();
                 break;
 
             case 3:
@@ -218,10 +221,10 @@ void CustomWaveform::Draw(const PerFrameContext& presetPerFrameContext)
                 {
                     vertices[j].SetX(vertices[j].X() - incrementX);
                 }
+                m_mesh.Vertices().Update();
                 break;
         }
 
-        m_mesh.Update();
         m_mesh.Draw();
     }
 

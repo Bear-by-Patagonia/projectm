@@ -98,6 +98,8 @@ private:
     WaveformPerPointContext m_perPointContext; //!< Holds the code execution context for per-point expressions
 
     Renderer::Mesh m_mesh; //!< Points in this waveform.
+    std::vector<Renderer::Point> m_points; //!< Reusable point buffer to avoid per-frame heap allocations.
+    std::vector<Renderer::Color> m_colors; //!< Reusable color buffer to avoid per-frame heap allocations.
 
     friend class WaveformPerFrameContext;
     friend class WaveformPerPointContext;

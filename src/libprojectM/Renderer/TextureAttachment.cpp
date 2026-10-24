@@ -73,13 +73,14 @@ void TextureAttachment::ReplaceTexture(int width, int height)
         case AttachmentType::Color:
             if (m_internalFormat == 0)
             {
-                internalFormat = GL_RGBA;
+                internalFormat = GL_RGBA8;
                 textureFormat = GL_RGBA;
                 pixelFormat = GL_UNSIGNED_BYTE;
             }
             else
             {
-                internalFormat = m_internalFormat;
+                internalFormat = (m_internalFormat == GL_RGBA) ? GL_RGBA8 :
+                                 (m_internalFormat == GL_RGB)  ? GL_RGB8  : m_internalFormat;
                 textureFormat = m_format;
                 pixelFormat = m_type;
             }
@@ -109,7 +110,11 @@ void TextureAttachment::ReplaceTexture(int width, int height)
     GLuint textureId;
     glGenTextures(1, &textureId);
     glBindTexture(GL_TEXTURE_2D, textureId);
+#ifdef USE_GLES
+    glTexStorage2D(GL_TEXTURE_2D, 1, internalFormat, width, height);
+#else
     glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, textureFormat, pixelFormat, nullptr);
+#endif
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);

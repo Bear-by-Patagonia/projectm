@@ -264,6 +264,7 @@ void CustomShape::Draw()
                 switch (iteration)
                 {
                     case 0:
+                        m_outlineMesh.Update();
                         break;
 
                     case 1:
@@ -271,6 +272,7 @@ void CustomShape::Draw()
                         {
                             points[j].SetX(points[j].X() + incrementX);
                         }
+                        m_outlineMesh.Vertices().Update();
                         break;
 
                     case 2:
@@ -278,6 +280,7 @@ void CustomShape::Draw()
                         {
                             points[j].SetY(points[j].Y() + incrementY);
                         }
+                        m_outlineMesh.Vertices().Update();
                         break;
 
                     case 3:
@@ -285,10 +288,10 @@ void CustomShape::Draw()
                         {
                             points[j].SetX(points[j].X() - incrementX);
                         }
+                        m_outlineMesh.Vertices().Update();
                         break;
                 }
 
-                m_outlineMesh.Update();
                 m_outlineMesh.Draw();
             }
         }

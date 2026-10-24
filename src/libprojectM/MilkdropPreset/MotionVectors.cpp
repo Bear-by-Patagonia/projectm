@@ -61,7 +61,7 @@ void MotionVectors::Draw(const PerFrameContext& presetPerFrameContext, std::shar
     float const inverseHeight = 1.25f / static_cast<float>(m_presetState.renderContext.viewportSizeY);
     float const minimumLength = sqrtf(inverseWidth * inverseWidth + inverseHeight * inverseHeight);
 
-    m_motionVectorMesh.SetVertexCount(static_cast<std::size_t>(countX + 1) * 2); // countX + 1 lines for each grid row, 2 vertices each.
+    m_motionVectorMesh.SetVertexCount(static_cast<std::size_t>(countX) * static_cast<std::size_t>(countY) * 2);
 
     Renderer::BlendMode::Set(true, Renderer::BlendMode::Function::SourceAlpha, Renderer::BlendMode::Function::OneMinusSourceAlpha);
 
@@ -87,30 +87,34 @@ void MotionVectors::Draw(const PerFrameContext& presetPerFrameContext, std::shar
 #endif
 
     auto& lineVertices = m_motionVectorMesh.Vertices();
+    std::size_t vertex = 0;
+    float const invDenomY = 1.0f / (static_cast<float>(countY) + divertY + 0.25f - 1.0f);
+    float const invDenomX = 1.0f / (static_cast<float>(countX) + divertX + 0.25f - 1.0f);
 
     for (int y = 0; y < countY; y++)
     {
-        float const posY = (static_cast<float>(y) + 0.25f) / (static_cast<float>(countY) + divertY + 0.25f - 1.0f) - divertY2;
+        float const posY = (static_cast<float>(y) + 0.25f) * invDenomY - divertY2;
 
         if (posY > 0.0001f && posY < 0.9999f)
         {
-            int vertex = 0;
             for (int x = 0; x < countX; x++)
             {
-                float const posX = (static_cast<float>(x) + 0.25f) / (static_cast<float>(countX) + divertX + 0.25f - 1.0f) + divertX2;
+                float const posX = (static_cast<float>(x) + 0.25f) * invDenomX + divertX2;
 
                 if (posX > 0.0001f && posX < 0.9999f)
                 {
                     lineVertices[vertex + 1] = lineVertices[vertex] = {posX, posY};
-
                     vertex += 2;
                 }
             }
-
-            // Draw a row of lines.
-            m_motionVectorMesh.Update();
-            m_motionVectorMesh.Draw();
         }
+    }
+
+    if (vertex > 0)
+    {
+        m_motionVectorMesh.SetVertexCount(vertex);
+        m_motionVectorMesh.Update();
+        m_motionVectorMesh.Draw();
     }
 
     Renderer::Mesh::Unbind();

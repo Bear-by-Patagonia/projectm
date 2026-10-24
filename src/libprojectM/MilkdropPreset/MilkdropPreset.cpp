@@ -65,7 +65,7 @@ void MilkdropPreset::Initialize(const Renderer::RenderContext& renderContext)
 
     // Update framebuffer and texture sizes if needed
     m_framebuffer.SetSize(renderContext.viewportSizeX, renderContext.viewportSizeY);
-    m_motionVectorUVMap->SetSize(renderContext.viewportSizeX, renderContext.viewportSizeY);
+    m_hasValidMotionVectorUVMap = false;
     if (m_state.mainTexture.expired())
     {
         m_state.mainTexture = m_framebuffer.GetColorAttachmentTexture(1, 0);
@@ -83,8 +83,8 @@ void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audio
     // Update framebuffer and u/v texture size if needed
     if (m_framebuffer.SetSize(renderContext.viewportSizeX, renderContext.viewportSizeY))
     {
-        m_motionVectorUVMap->SetSize(renderContext.viewportSizeX, renderContext.viewportSizeY);
         m_isFirstFrame = true;
+        m_hasValidMotionVectorUVMap = false;
     }
 
     m_state.mainTexture = m_framebuffer.GetColorAttachmentTexture(m_previousFrameBuffer, 0);
@@ -92,12 +92,20 @@ void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audio
     // First evaluate per-frame code
     PerFrameUpdate();
 
+    const bool mvActive = (*m_perFrameContext.mv_a >= 0.0001 &&
+                           static_cast<int>(*m_perFrameContext.mv_x) > 0 &&
+                           static_cast<int>(*m_perFrameContext.mv_y) > 0);
+    if (mvActive)
+    {
+        m_motionVectorUVMap->SetSize(renderContext.viewportSizeX, renderContext.viewportSizeY);
+    }
+
     glViewport(0, 0, renderContext.viewportSizeX, renderContext.viewportSizeY);
 
     m_framebuffer.Bind(m_previousFrameBuffer);
     // Motion vector field. Drawn to the previous frame texture before warping it.
-    // Only do it after drawing one frame after init or resize.
-    if (!m_isFirstFrame)
+    // Only do it after drawing one frame after init or resize when UV map was populated.
+    if (!m_isFirstFrame && mvActive && m_hasValidMotionVectorUVMap)
     {
         m_motionVectors.Draw(m_perFrameContext, m_motionVectorUVMap->Texture());
     }
@@ -113,16 +121,26 @@ void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audio
     // We now draw to the current framebuffer.
     m_framebuffer.Bind(m_currentFrameBuffer);
 
-    // Add motion vector u/v texture for the warp mesh draw and clean both buffers.
-    m_framebuffer.SetAttachment(m_currentFrameBuffer, 1, m_motionVectorUVMap);
+    // Only attach motion vector u/v texture (MRT GL_COLOR_ATTACHMENT1) when motion vectors are active.
+    // Skipping MRT when mv_a == 0 saves ~3.7-8.3 MB/frame of RG16F tile write bandwidth.
+    if (mvActive)
+    {
+        m_framebuffer.SetAttachment(m_currentFrameBuffer, 1, m_motionVectorUVMap);
+    }
 
     // Draw previous frame image warped via per-pixel mesh and warp shader
     m_perPixelMesh.Draw(m_state, m_perFrameContext, m_perPixelContext);
 
-    // Remove the u/v texture from the framebuffer.
-    const GLenum uvAttachment = GL_COLOR_ATTACHMENT1;
-    glInvalidateFramebuffer(GL_FRAMEBUFFER, 1, &uvAttachment);
-    m_framebuffer.RemoveColorAttachment(m_currentFrameBuffer, 1);
+    if (mvActive)
+    {
+        // Detach the u/v texture from the framebuffer (keep contents valid for next frame's MotionVectors::Draw).
+        m_framebuffer.RemoveColorAttachment(m_currentFrameBuffer, 1);
+        m_hasValidMotionVectorUVMap = true;
+    }
+    else
+    {
+        m_hasValidMotionVectorUVMap = false;
+    }
 
     // Update blur textures only if active preset shader requires blur
     if (m_state.blurTexture.GetRequiredBlurLevel() != BlurTexture::BlurLevel::None)

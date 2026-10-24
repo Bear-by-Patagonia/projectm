@@ -32,6 +32,14 @@ void Border::Draw(const PerFrameContext& presetPerFrameContext)
     // Draw Borders
     float const outerBorderSize = static_cast<float>(*presetPerFrameContext.ob_size);
     float const innerBorderSize = static_cast<float>(*presetPerFrameContext.ib_size);
+    float const outerAlpha = static_cast<float>(*presetPerFrameContext.ob_a);
+    float const innerAlpha = static_cast<float>(*presetPerFrameContext.ib_a);
+
+    if ((outerBorderSize <= 0.0001f || outerAlpha <= 0.001f) &&
+        (innerBorderSize <= 0.0001f || innerAlpha <= 0.001f))
+    {
+        return;
+    }
 
     // No additive drawing for borders
     Renderer::BlendMode::Set(true, Renderer::BlendMode::Function::SourceAlpha, Renderer::BlendMode::Function::OneMinusSourceAlpha);

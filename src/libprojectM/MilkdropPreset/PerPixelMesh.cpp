@@ -134,6 +134,7 @@ void PerPixelMesh::InitializeMesh(const PresetState& presetState)
         m_stretchBuffer.Resize(vertexCount);
 
         m_warpMesh.Indices().Resize(m_gridSizeX * m_gridSizeY * 6);
+        m_hasCachedUniforms = false;
     }
     else if (m_viewportWidth == presetState.renderContext.viewportSizeX &&
              m_viewportHeight == presetState.renderContext.viewportSizeY)
@@ -235,6 +236,22 @@ void PerPixelMesh::CalculateMesh([[maybe_unused]] const PresetState& presetState
 
     if (!perPixelContext.perPixelCodeHandle)
     {
+        if (m_hasCachedUniforms &&
+            m_cachedTotalVertices == totalVertices &&
+            m_cachedZoom == zoom &&
+            m_cachedZoomExp == zoomExp &&
+            m_cachedRot == rot &&
+            m_cachedWarp == warp &&
+            m_cachedCx == cx &&
+            m_cachedCy == cy &&
+            m_cachedDx == dx &&
+            m_cachedDy == dy &&
+            m_cachedSx == sx &&
+            m_cachedSy == sy)
+        {
+            return;
+        }
+
         // Broadcast uniform per-frame values directly into VBOs.
         // Avoids VAO attribute toggling bugs that leak into custom shapes / 3D objects.
         ZoomRotWarp zrw{zoom, zoomExp, rot, warp};
@@ -251,9 +268,35 @@ void PerPixelMesh::CalculateMesh([[maybe_unused]] const PresetState& presetState
         m_centerBuffer.Update();
         m_distanceBuffer.Update();
         m_stretchBuffer.Update();
+
+        m_hasCachedUniforms = true;
+        m_cachedTotalVertices = totalVertices;
+        m_cachedZoom = zoom;
+        m_cachedZoomExp = zoomExp;
+        m_cachedRot = rot;
+        m_cachedWarp = warp;
+        m_cachedCx = cx;
+        m_cachedCy = cy;
+        m_cachedDx = dx;
+        m_cachedDy = dy;
+        m_cachedSx = sx;
+        m_cachedSy = sy;
         return;
     }
+
+    m_hasCachedUniforms = false;
     auto& vertices = m_warpMesh.Vertices();
+
+    const double baseZoom = *perFrameContext.zoom;
+    const double baseZoomExp = *perFrameContext.zoomexp;
+    const double baseRot = *perFrameContext.rot;
+    const double baseWarp = *perFrameContext.warp;
+    const double baseCx = *perFrameContext.cx;
+    const double baseCy = *perFrameContext.cy;
+    const double baseDx = *perFrameContext.dx;
+    const double baseDy = *perFrameContext.dy;
+    const double baseSx = *perFrameContext.sx;
+    const double baseSy = *perFrameContext.sy;
 
     for (int vertex = 0; vertex < totalVertices; ++vertex)
     {
@@ -268,16 +311,16 @@ void PerPixelMesh::CalculateMesh([[maybe_unused]] const PresetState& presetState
         *perPixelContext.y = static_cast<double>(curVertex.Y() * 0.5f + 0.5f);
         *perPixelContext.rad = static_cast<double>(curRadiusAngle.radius);
         *perPixelContext.ang = static_cast<double>(-curRadiusAngle.angle);
-        *perPixelContext.zoom = static_cast<double>(*perFrameContext.zoom);
-        *perPixelContext.zoomexp = static_cast<double>(*perFrameContext.zoomexp);
-        *perPixelContext.rot = static_cast<double>(*perFrameContext.rot);
-        *perPixelContext.warp = static_cast<double>(*perFrameContext.warp);
-        *perPixelContext.cx = static_cast<double>(*perFrameContext.cx);
-        *perPixelContext.cy = static_cast<double>(*perFrameContext.cy);
-        *perPixelContext.dx = static_cast<double>(*perFrameContext.dx);
-        *perPixelContext.dy = static_cast<double>(*perFrameContext.dy);
-        *perPixelContext.sx = static_cast<double>(*perFrameContext.sx);
-        *perPixelContext.sy = static_cast<double>(*perFrameContext.sy);
+        *perPixelContext.zoom = baseZoom;
+        *perPixelContext.zoomexp = baseZoomExp;
+        *perPixelContext.rot = baseRot;
+        *perPixelContext.warp = baseWarp;
+        *perPixelContext.cx = baseCx;
+        *perPixelContext.cy = baseCy;
+        *perPixelContext.dx = baseDx;
+        *perPixelContext.dy = baseDy;
+        *perPixelContext.sx = baseSx;
+        *perPixelContext.sy = baseSy;
 
         perPixelContext.ExecutePerPixelCode();
 

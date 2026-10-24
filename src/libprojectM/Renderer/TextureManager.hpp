@@ -30,6 +30,11 @@ public:
     void SetCurrentPresetPath(const std::string& path);
 
     /**
+     * @brief Updates the texture search paths in-place without recreating preloaded procedural noise textures.
+     */
+    void SetTextureSearchPaths(const std::vector<std::string>& textureSearchPaths);
+
+    /**
      * @brief Loads a texture and returns a descriptor with the given name.
      * Resets the texture age to zero.
      * @param fullName

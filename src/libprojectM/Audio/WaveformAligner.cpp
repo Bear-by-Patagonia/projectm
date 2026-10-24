@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <iterator>
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+#endif
 
 namespace libprojectM {
 namespace Audio {
@@ -21,6 +24,7 @@ WaveformAligner::WaveformAligner()
     m_octaveSamples.resize(m_octaves);
     m_octaveSampleSpacing.resize(m_octaves);
     m_oldWaveformMips.resize(m_octaves);
+    m_newWaveformMips.resize(m_octaves);
 
     m_octaveSamples[0] = AudioBufferSamples;
     m_octaveSampleSpacing[0] = AudioBufferSamples - WaveformSamples;
@@ -136,16 +140,42 @@ int WaveformAligner::CalculateOffset(std::vector<WaveformBuffer>& newWaveformMip
         int lowestErrorOffset{-1};
         float lowestErrorAmount{};
 
+        const uint32_t firstWeight = m_firstNonzeroWeights[octave];
+        const uint32_t lastWeight = m_lastNonzeroWeights[octave];
+        const float* const oldMipPtr = m_oldWaveformMips[octave].data();
+        const float* const weightPtr = m_aligmentWeights[octave].data();
+        const float* const newMipBase = newWaveformMips[octave].data();
+
         // For each octave, find the offset that maximizes the correlation between waveforms.
         for (int sample = offsetStart; sample < offsetEnd; sample++)
         {
             float errorSum{};
+            const float* const newMipPtr = newMipBase + sample;
+            uint32_t i = firstWeight;
 
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+            float32x4_t vSum = vdupq_n_f32(0.0f);
+            for (; i + 3 <= lastWeight; i += 4)
+            {
+                float32x4_t vNew = vld1q_f32(newMipPtr + i);
+                float32x4_t vOld = vld1q_f32(oldMipPtr + i);
+                float32x4_t vW   = vld1q_f32(weightPtr + i);
+                float32x4_t vDiff = vabdq_f32(vNew, vOld);
+                vSum = vmlaq_f32(vSum, vDiff, vW);
+            }
+#if defined(__aarch64__)
+            errorSum = vaddvq_f32(vSum);
+#else
+            float32x2_t vPair = vadd_f32(vget_low_f32(vSum), vget_high_f32(vSum));
+            vPair = vpadd_f32(vPair, vPair);
+            errorSum = vget_lane_f32(vPair, 0);
+#endif
+#endif
             // Perform the cross-correlation. Note that we shift the new waveform but not the old
             // one because we're looking for the offset between them that produces the lowest error.
-            for (uint32_t i = m_firstNonzeroWeights[octave]; i <= m_lastNonzeroWeights[octave]; i++)
+            for (; i <= lastWeight; i++)
             {
-                errorSum += std::abs((newWaveformMips[octave][i + sample] - m_oldWaveformMips[octave][i]) * m_aligmentWeights[octave][i]);
+                errorSum += std::abs((newMipPtr[i] - oldMipPtr[i]) * weightPtr[i]);
             }
 
             if (lowestErrorOffset == -1 || errorSum < lowestErrorAmount)
@@ -200,8 +230,7 @@ void WaveformAligner::Align(WaveformBuffer& newWaveform)
     }
 
 
-    std::vector<WaveformBuffer> newWaveformMips(m_octaves, WaveformBuffer());
-    ResampleOctaves(newWaveformMips, newWaveform);
+    ResampleOctaves(m_newWaveformMips, newWaveform);
 
     if (!m_alignWaveReady)
     {
@@ -210,7 +239,7 @@ void WaveformAligner::Align(WaveformBuffer& newWaveform)
         m_alignWaveReady = true;
     }
 
-    int alignOffset = CalculateOffset(newWaveformMips);
+    int alignOffset = CalculateOffset(m_newWaveformMips);
 
     // Finally, apply the results by scooting the aligned samples so that they start at index 0.
     // This is the second place where we limit negative offsets.

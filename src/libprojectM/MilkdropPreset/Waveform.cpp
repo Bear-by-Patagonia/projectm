@@ -23,6 +23,12 @@ Waveform::Waveform(PresetState& presetState)
 
 void Waveform::Draw(const PerFrameContext& presetPerFrameContext)
 {
+    if (*presetPerFrameContext.wave_a <= 0.0001 ||
+        (m_presetState.modWaveAlphaByvolume && m_presetState.audioData.vol <= m_presetState.modWaveAlphaStart))
+    {
+        return;
+    }
+
     m_mode = static_cast<WaveformMode>(m_presetState.waveMode % static_cast<int>(WaveformMode::Count));
 
     if (!m_waveformMath)
@@ -65,6 +71,10 @@ void Waveform::Draw(const PerFrameContext& presetPerFrameContext)
 
         m_tempAlpha = static_cast<float>(*presetPerFrameContext.wave_a);
         MaximizeColors(presetPerFrameContext);
+        if (m_tempAlpha <= 0.0001f)
+        {
+            continue;
+        }
 
         // Always draw "thick" dots.
         const auto iterations = m_presetState.waveThick || m_presetState.waveDots ? 4 : 1;
@@ -78,6 +88,12 @@ void Waveform::Draw(const PerFrameContext& presetPerFrameContext)
                                               ? Renderer::Mesh::PrimitiveType::LineLoop
                                               : Renderer::Mesh::PrimitiveType::LineStrip);
 
+        if (m_waveMesh.Indices().Size() != smoothedWave.size())
+        {
+            m_waveMesh.Indices().Resize(smoothedWave.size());
+            m_waveMesh.Indices().MakeContinuous();
+        }
+
         // If thick outline is used, draw the shape four times with slight offsets
         // (top left, top right, bottom right, bottom left).
         for (auto iteration = 0; iteration < iterations; iteration++)
@@ -85,6 +101,8 @@ void Waveform::Draw(const PerFrameContext& presetPerFrameContext)
             switch (iteration)
             {
                 case 0:
+                    m_waveMesh.Vertices().Set(smoothedWave);
+                    m_waveMesh.Update();
                     break;
 
                 case 1:
@@ -92,6 +110,8 @@ void Waveform::Draw(const PerFrameContext& presetPerFrameContext)
                     {
                         smoothedWave[j].SetX(smoothedWave[j].X() + incrementX);
                     }
+                    m_waveMesh.Vertices().Set(smoothedWave);
+                    m_waveMesh.Vertices().Update();
                     break;
 
                 case 2:
@@ -99,6 +119,8 @@ void Waveform::Draw(const PerFrameContext& presetPerFrameContext)
                     {
                         smoothedWave[j].SetY(smoothedWave[j].Y() + incrementY);
                     }
+                    m_waveMesh.Vertices().Set(smoothedWave);
+                    m_waveMesh.Vertices().Update();
                     break;
 
                 case 3:
@@ -106,13 +128,11 @@ void Waveform::Draw(const PerFrameContext& presetPerFrameContext)
                     {
                         smoothedWave[j].SetX(smoothedWave[j].X() - incrementX);
                     }
+                    m_waveMesh.Vertices().Set(smoothedWave);
+                    m_waveMesh.Vertices().Update();
                     break;
             }
 
-            m_waveMesh.Vertices().Set(smoothedWave);
-            m_waveMesh.Indices().Resize(smoothedWave.size());
-            m_waveMesh.Indices().MakeContinuous();
-            m_waveMesh.Update();
             m_waveMesh.Draw();
         }
     }

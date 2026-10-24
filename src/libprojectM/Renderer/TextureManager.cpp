@@ -37,6 +37,13 @@ void TextureManager::SetCurrentPresetPath(const std::string&)
 {
 }
 
+void TextureManager::SetTextureSearchPaths(const std::vector<std::string>& textureSearchPaths)
+{
+    m_textureSearchPaths = textureSearchPaths;
+    m_scannedTextureFiles.clear();
+    m_filesScanned = false;
+}
+
 auto TextureManager::GetSamplerForMode(GLint wrapMode, GLint filterMode) -> std::shared_ptr<Sampler>
 {
     auto it = m_samplers.find({wrapMode, filterMode});

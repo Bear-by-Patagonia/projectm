@@ -25,7 +25,16 @@ void Shader::CompileProgram(const std::string& vertexShaderSource,
                             const std::string& fragmentShaderSource)
 {
     auto vertexShader = CompileShader(vertexShaderSource, GL_VERTEX_SHADER);
-    auto fragmentShader = CompileShader(fragmentShaderSource, GL_FRAGMENT_SHADER);
+    GLuint fragmentShader = 0;
+    try
+    {
+        fragmentShader = CompileShader(fragmentShaderSource, GL_FRAGMENT_SHADER);
+    }
+    catch (...)
+    {
+        glDeleteShader(vertexShader);
+        throw;
+    }
 
     glAttachShader(m_shaderProgram, vertexShader);
     glAttachShader(m_shaderProgram, fragmentShader);
@@ -43,6 +52,8 @@ void Shader::CompileProgram(const std::string& vertexShaderSource,
     if (programLinked == GL_TRUE)
     {
         m_uniformLocationCache.clear();
+        m_uniformIntCache.clear();
+        m_uniformFloatCache.clear();
         m_uniformVec4Cache.clear();
         m_uniformMat4Cache.clear();
         return;
@@ -139,7 +150,19 @@ void Shader::SetUniformInt(const char* uniform, int value) const
     {
         return;
     }
+    auto locIdx = static_cast<size_t>(location);
+    if (locIdx >= m_uniformIntCache.size())
+    {
+        m_uniformIntCache.resize(locIdx + 16);
+    }
+    auto& cached = m_uniformIntCache[locIdx];
+    if (cached.valid && cached.v == value)
+    {
+        return;
+    }
     glUniform1iv(location, 1, &value);
+    cached.valid = true;
+    cached.v = value;
 }
 
 void Shader::SetUniformFloat2(const char* uniform, const glm::vec2& values) const

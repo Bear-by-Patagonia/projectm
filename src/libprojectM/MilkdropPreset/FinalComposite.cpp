@@ -148,7 +148,10 @@ void FinalComposite::Draw(const PresetState& presetState, const PerFrameContext&
     if (m_compositeShader)
     {
         InitializeMesh(presetState);
-        ApplyHueShaderColors(presetState);
+        if (presetState.compositeShaderVersion > 0 || presetState.shader > 0.001f)
+        {
+            ApplyHueShaderColors(presetState);
+        }
 
         // Render the grid
         Renderer::BlendMode::SetBlendActive(false);
@@ -321,9 +324,18 @@ void FinalComposite::InitializeMesh(const PresetState& presetState)
         }
     }
 
+    auto& colors = m_compositeMesh.Colors();
+    for (int i = 0; i < vertexCount; i++)
+    {
+        colors[i] = {1.0f, 1.0f, 1.0f, 1.0f};
+    }
+
     // Update mesh geometry and indices.
     m_compositeMesh.Update();
     m_radiusAngle.Update();
+
+    m_viewportWidth = presetState.renderContext.viewportSizeX;
+    m_viewportHeight = presetState.renderContext.viewportSizeY;
 }
 
 float FinalComposite::SquishToCenter(float x, float exponent)
