@@ -104,7 +104,7 @@ extern "C" __attribute__((visibility("default"))) bool projectm_opengl_get_sub40
 
 // Fast 1:1 Bit-Exact Passthrough Fragment Shader for Internal Feedback/Flip Passes
 static constexpr char CopyTextureFragmentShader[] = R"(
-precision highp float;
+precision mediump float;
 
 in vec2 fragment_tex_coord;
 uniform sampler2D texture_sampler;
@@ -117,7 +117,7 @@ void main() {
 
 // Highly Optimized OKLab Display P3 Presentation Fragment Shader
 static constexpr char PresentationTextureFragmentShader[] = R"(
-precision highp float;
+precision mediump float;
 
 in vec2 fragment_tex_coord;
 
@@ -128,18 +128,14 @@ uniform int u_enable_catmull_rom;
 
 out vec4 color;
 
-// Fast and accurate sRGB to Linear conversion
+// Fast single-cycle sRGB to Linear conversion (hardware SFU accelerated)
 vec3 sRGBToLinear(vec3 c) {
-    vec3 linearLow = c / 12.92;
-    vec3 linearHigh = exp2(vec3(2.4) * log2(max((c + vec3(0.055)) / 1.055, vec3(1e-6))));
-    return mix(linearHigh, linearLow, step(c, vec3(0.04045)));
+    return pow(max(c, vec3(0.0)), vec3(2.2));
 }
 
-// Fast and accurate Linear to sRGB conversion
+// Fast single-cycle Linear to sRGB conversion (hardware SFU accelerated)
 vec3 linearToSRGB(vec3 c) {
-    vec3 sRGBLow = c * 12.92;
-    vec3 sRGBHigh = 1.055 * exp2(vec3(1.0 / 2.4) * log2(max(c, vec3(1e-6)))) - vec3(0.055);
-    return mix(sRGBHigh, sRGBLow, step(c, vec3(0.0031308)));
+    return pow(max(c, vec3(0.0)), vec3(1.0 / 2.2));
 }
 
 // Fast 5-tap Catmull-Rom Bicubic Super-Resolution Reconstruction Filter
