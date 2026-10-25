@@ -324,6 +324,24 @@ void MilkdropPreset::PerFrameUpdate()
 
     m_perPixelContext.LoadPerFrameQVariables(m_state, m_perFrameContext);
 
+    // Normalize video echo zoom and alpha to nominal 60 FPS
+    if (m_perFrameContext.echo_zoom && instantFps > 1.0)
+    {
+        const double rawEchoZoom = *m_perFrameContext.echo_zoom;
+        if (std::abs(rawEchoZoom - 1.0) > 1e-4 && rawEchoZoom > 0.0)
+        {
+            *m_perFrameContext.echo_zoom = static_cast<PRJM_EVAL_F>(std::pow(rawEchoZoom, 60.0 / instantFps));
+        }
+    }
+    if (m_perFrameContext.echo_alpha && instantFps > 1.0)
+    {
+        const double rawEchoAlpha = *m_perFrameContext.echo_alpha;
+        if (rawEchoAlpha > 0.0 && rawEchoAlpha < 1.0)
+        {
+            *m_perFrameContext.echo_alpha = static_cast<PRJM_EVAL_F>(std::pow(rawEchoAlpha, 60.0 / instantFps));
+        }
+    }
+
     // Clamp gamma and echo zoom values
     *m_perFrameContext.gamma = std::max(0.0, std::min(8.0, *m_perFrameContext.gamma));
     *m_perFrameContext.echo_zoom = std::max(0.001, std::min(1000.0, *m_perFrameContext.echo_zoom));

@@ -246,12 +246,12 @@ void PerPixelMesh::CalculateMesh(const PresetState& presetState, const PerFrameC
     float sy = static_cast<float>(*perFrameContext.sy);
 
     // Time-step kinematic independence (anti-"Pac-Man Turbo" protection):
-    // When running above 60 FPS (e.g. 90Hz/120Hz displays or ultra-fast GPU frames),
+    // When running above or below 60 FPS (e.g. 90Hz/120Hz displays, or heavy 4K shaders),
     // normalize per-frame iterative advection steps so angular, linear, and exponential
     // velocities per real-world second remain strictly constant.
     const float currentFps = presetState.renderContext.fps;
-    const float kappa = (currentFps > 62.0f) ? std::clamp(60.0f / currentFps, 0.25f, 1.0f) : 1.0f;
-    const bool applyTimeScale = (kappa < 0.98f);
+    const float kappa = (currentFps > 5.0f) ? std::clamp(60.0f / currentFps, 0.40f, 2.50f) : 1.0f;
+    const bool applyTimeScale = (std::abs(kappa - 1.0f) > 0.03f);
 
     if (applyTimeScale)
     {
