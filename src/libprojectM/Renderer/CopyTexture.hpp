@@ -24,6 +24,9 @@ public:
     static void SetWideGamutEnabled(bool enabled);
     static bool IsWideGamutEnabled();
 
+    static void SetCatmullRomTsrEnabled(bool enabled);
+    static bool IsCatmullRomTsrEnabled();
+
     /**
      * @brief Sets the color profile mode:
      * 0 = Natural (Cinema Reference, relaxed saturation, dye-transfer density) [Default]

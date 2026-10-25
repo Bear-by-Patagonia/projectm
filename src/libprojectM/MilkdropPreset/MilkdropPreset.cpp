@@ -188,6 +188,9 @@ void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audio
 
     m_finalComposite.Draw(m_state, m_perFrameContext);
 
+    // TBDR Tile-Memory Bandwidth Optimization: Invalidate read framebuffer attachments immediately
+    glInvalidateFramebuffer(GL_READ_FRAMEBUFFER, 2, drawDiscards);
+
     if (!m_finalComposite.HasCompositeShader())
     {
         // Flip texture again in "previous" framebuffer as old-school effects are still upside down.

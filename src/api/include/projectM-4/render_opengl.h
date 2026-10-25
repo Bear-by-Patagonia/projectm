@@ -153,6 +153,12 @@ PROJECTM_EXPORT void projectm_opengl_set_catmull_rom(bool enabled);
 PROJECTM_EXPORT bool projectm_opengl_get_catmull_rom();
 
 /**
+ * @brief Enables or disables 5-tap Catmull-Rom TSR presentation upscaling.
+ */
+PROJECTM_EXPORT void projectm_opengl_set_catmull_rom_tsr(bool enabled);
+PROJECTM_EXPORT bool projectm_opengl_get_catmull_rom_tsr();
+
+/**
  * @brief Enables or disables 2X Rotated Grid Super-Sampled (RGSS) reconstruction anti-aliasing
  * when dynamic resolution drops below 400p (< 10 FPS on heavy 3D presets).
  */

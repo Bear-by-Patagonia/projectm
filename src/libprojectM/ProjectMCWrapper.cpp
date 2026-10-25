@@ -13,6 +13,7 @@
 #include <projectM-4/render_opengl.h>
 
 #include <MilkdropPreset/MilkdropShader.hpp>
+#include <Renderer/CopyTexture.hpp>
 
 #include <cstring>
 #include <sstream>
@@ -295,6 +296,16 @@ void projectm_opengl_set_catmull_rom(bool enabled)
 bool projectm_opengl_get_catmull_rom()
 {
     return libprojectM::MilkdropPreset::MilkdropShader::IsCatmullRomEnabled();
+}
+
+void projectm_opengl_set_catmull_rom_tsr(bool enabled)
+{
+    libprojectM::Renderer::CopyTexture::SetCatmullRomTsrEnabled(enabled);
+}
+
+bool projectm_opengl_get_catmull_rom_tsr()
+{
+    return libprojectM::Renderer::CopyTexture::IsCatmullRomTsrEnabled();
 }
 
 void projectm_set_frame_time(projectm_handle instance, double seconds_since_first_frame)

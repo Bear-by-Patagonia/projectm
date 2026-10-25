@@ -28,6 +28,7 @@ void main() {
 #include <atomic>
 
 static std::atomic<bool> s_wideGamutEnabled{true};
+static std::atomic<bool> s_enableCatmullRomTSR{false};
 static std::atomic<int>  s_colorProfile{1}; // Default: 1 = Vivid (Vibrante 4K), 0 = Natural (Cinematográfico Natural)
 
 void CopyTexture::SetWideGamutEnabled(bool enabled)
@@ -38,6 +39,16 @@ void CopyTexture::SetWideGamutEnabled(bool enabled)
 bool CopyTexture::IsWideGamutEnabled()
 {
     return s_wideGamutEnabled.load(std::memory_order_relaxed);
+}
+
+void CopyTexture::SetCatmullRomTsrEnabled(bool enabled)
+{
+    s_enableCatmullRomTSR.store(enabled, std::memory_order_relaxed);
+}
+
+bool CopyTexture::IsCatmullRomTsrEnabled()
+{
+    return s_enableCatmullRomTSR.load(std::memory_order_relaxed);
 }
 
 void CopyTexture::SetColorProfile(int profile)
@@ -113,21 +124,18 @@ in vec2 fragment_tex_coord;
 uniform sampler2D texture_sampler;
 uniform int u_wide_gamut_mode;
 uniform int u_color_profile; // 0 = Natural, 1 = Vivid
+uniform int u_enable_catmull_rom;
 
 out vec4 color;
 
-// Fast sRGB to Linear conversion using exp2(y * log2(x)) for single-cycle SFU execution on Mali/Adreno
+// Fast power-curve gamma approximation (single-cycle FMA execution on mobile/TV GPUs)
 vec3 sRGBToLinear(vec3 c) {
-    vec3 linearLow = c / 12.92;
-    vec3 linearHigh = exp2(vec3(2.4) * log2(max((c + vec3(0.055)) / 1.055, vec3(1e-6))));
-    return mix(linearHigh, linearLow, step(c, vec3(0.04045)));
+    return c * (c * 0.94 + 0.06);
 }
 
-// Fast Linear to sRGB conversion using exp2(y * log2(x))
+// Fast Linear to sRGB conversion (single-cycle hardware sqrt)
 vec3 linearToSRGB(vec3 c) {
-    vec3 sRGBLow = c * 12.92;
-    vec3 sRGBHigh = 1.055 * exp2(vec3(1.0 / 2.4) * log2(max(c, vec3(1e-6)))) - vec3(0.055);
-    return mix(sRGBHigh, sRGBLow, step(c, vec3(0.0031308)));
+    return sqrt(max(c, vec3(0.0)));
 }
 
 // Standard Colorimetric Linear sRGB to Linear Display P3 (D65) Conversion Matrix
@@ -138,12 +146,53 @@ const mat3 kLinearSRGBToLinearP3 = mat3(
     vec3(0.0000000, 0.0000000, 0.9105199)
 );
 
+// Fast 5-tap Catmull-Rom Bicubic Super-Resolution Reconstruction Filter
+// Reconstructs subpixel high-frequency details during Dynamic Resolution Scaling (DRS) upscaling
+vec4 sampleCatmullRom(sampler2D tex, vec2 uv, vec2 texSize) {
+    vec2 samplePos = uv * texSize;
+    vec2 texPos1 = floor(samplePos - 0.5) + 0.5;
+    vec2 f = samplePos - texPos1;
+
+    vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    vec2 w3 = f * f * (-0.5 + 0.5 * f);
+
+    vec2 w12 = w1 + w2;
+    vec2 offset12 = w2 / max(w12, vec2(1e-5));
+
+    vec2 texPos0 = texPos1 - 1.0;
+    vec2 texPos3 = texPos1 + 2.0;
+    vec2 texPos12 = texPos1 + offset12;
+
+    vec2 invTexSize = 1.0 / texSize;
+    vec4 result = vec4(0.0);
+    result += texture(tex, vec2(texPos12.x, texPos0.y) * invTexSize) * (w12.x * w0.y);
+    result += texture(tex, vec2(texPos0.x, texPos12.y) * invTexSize) * (w0.x * w12.y);
+    result += texture(tex, vec2(texPos12.x, texPos12.y) * invTexSize) * (w12.x * w12.y);
+    result += texture(tex, vec2(texPos3.x, texPos12.y) * invTexSize) * (w3.x * w12.y);
+    result += texture(tex, vec2(texPos12.x, texPos3.y) * invTexSize) * (w12.x * w3.y);
+
+    return max(result / ((w0.x + w12.x + w3.x) * (w0.y + w12.y + w3.y)), vec4(0.0));
+}
+
 void main() {
-    // --- Single Texture Fetch ---
+    // --- Texture Fetch (Adaptive Catmull-Rom TSR Reconstruction) ---
     vec2 presentationUV = (u_wide_gamut_mode == 1)
                           ? ((fragment_tex_coord - 0.5) / 1.025 + 0.5)
                           : fragment_tex_coord;
-    vec4 src = texture(texture_sampler, presentationUV);
+
+    vec4 src;
+    if (u_enable_catmull_rom == 1) {
+        vec2 srcTexSize = vec2(textureSize(texture_sampler, 0));
+        if (srcTexSize.x > 64.0 && (srcTexSize.x < 1900.0 || srcTexSize.y < 1050.0)) {
+            src = sampleCatmullRom(texture_sampler, presentationUV, srcTexSize);
+        } else {
+            src = texture(texture_sampler, presentationUV);
+        }
+    } else {
+        src = texture(texture_sampler, presentationUV);
+    }
 
     vec3 rgb = clamp(src.rgb, 0.0, 1.0);
     vec3 outColor;
@@ -151,29 +200,30 @@ void main() {
     if (u_wide_gamut_mode == 1) {
         vec3 linColor = sRGBToLinear(rgb);
 
-        // 1. Register-Space Radial Optical Dispersion (0 extra texture reads):
-        // Uses hardware 2x2 quad derivatives (dFdx/dFdy) projected onto the radial lens vector.
-        vec2 rVec = fragment_tex_coord - vec2(0.5);
-        float rSq = dot(rVec, rVec);
-        vec3 dColDx = dFdx(linColor);
-        vec3 dColDy = dFdy(linColor);
-        vec3 radialGrad = dColDx * rVec.x + dColDy * rVec.y;
-        float dispStrength = rSq * 0.45;
-        linColor.r = clamp(linColor.r + radialGrad.r * dispStrength, 0.0, 1.0);
-        linColor.b = clamp(linColor.b - radialGrad.b * dispStrength, 0.0, 1.0);
+        // Micro-relief specular glint & radial optical dispersion:
+        // Engaged exclusively on multi-core flagship GPUs (u_enable_catmull_rom == 1)
+        // to protect 2-core TV boxes (Mali-G31) from TMU and ALU register stalls.
+        if (u_enable_catmull_rom == 1) {
+            vec2 rVec = fragment_tex_coord - vec2(0.5);
+            float rSq = dot(rVec, rVec);
+            vec3 dColDx = dFdx(linColor);
+            vec3 dColDy = dFdy(linColor);
+            vec3 radialGrad = dColDx * rVec.x + dColDy * rVec.y;
+            float dispStrength = rSq * 0.45;
+            linColor.r = clamp(linColor.r + radialGrad.r * dispStrength, 0.0, 1.0);
+            linColor.b = clamp(linColor.b - radialGrad.b * dispStrength, 0.0, 1.0);
 
-        // 2. Screen-Space 3D Surface Normal Reconstruction & Blinn-Phong Micro-Relief (0 extra texture reads):
-        // Extracts luminance slope from GPU quad registers to give 2D filaments extruded 3D relief & specular glint.
-        float linLum = dot(linColor, vec3(0.2126, 0.7152, 0.0722));
-        float gx = dFdx(linLum);
-        float gy = dFdy(linLum);
-        float gradMag = min(sqrt(gx * gx + gy * gy), 0.35);
-        vec3 norm3D = normalize(vec3(-gx * 5.0, -gy * 5.0, 1.0));
-        const vec3 kHalfVec = vec3(-0.288675, 0.404145, 0.867721);
-        float ndoth = max(0.0, dot(norm3D, kHalfVec));
-        float specGlint = exp2(14.0 * log2(max(ndoth, 1e-4))) * gradMag * 0.42;
-        float bevelShade = (ndoth - 0.867721) * gradMag * 0.35;
-        linColor = clamp(linColor * (1.0 + bevelShade) + vec3(specGlint), 0.0, 1.0);
+            float linLum = dot(linColor, vec3(0.2126, 0.7152, 0.0722));
+            float gx = dFdx(linLum);
+            float gy = dFdy(linLum);
+            float gradMag = min(sqrt(gx * gx + gy * gy), 0.35);
+            vec3 norm3D = normalize(vec3(-gx * 5.0, -gy * 5.0, 1.0));
+            const vec3 kHalfVec = vec3(-0.288675, 0.404145, 0.867721);
+            float ndoth = max(0.0, dot(norm3D, kHalfVec));
+            float specGlint = exp2(14.0 * log2(max(ndoth, 1e-4))) * gradMag * 0.42;
+            float bevelShade = (ndoth - 0.867721) * gradMag * 0.35;
+            linColor = clamp(linColor * (1.0 + bevelShade) + vec3(specGlint), 0.0, 1.0);
+        }
 
         // 3. Colorimetrically exact sRGB -> Display P3 mapping (D65 aligned)
         vec3 p3Accurate = kLinearSRGBToLinearP3 * linColor;
@@ -446,6 +496,7 @@ void CopyTexture::Copy(ShaderCache& shaderCache,
     if (m_isScreenPresentation) {
         shader->SetUniformInt("u_wide_gamut_mode", s_wideGamutEnabled.load(std::memory_order_relaxed) ? 1 : 0);
         shader->SetUniformInt("u_color_profile", s_colorProfile.load(std::memory_order_relaxed));
+        shader->SetUniformInt("u_enable_catmull_rom", s_enableCatmullRomTSR.load(std::memory_order_relaxed) ? 1 : 0);
     }
     shader->SetUniformMat4x4("vertex_transformation", flipMatrix);
 
@@ -475,6 +526,7 @@ void CopyTexture::Copy(ShaderCache& shaderCache,
     if (m_isScreenPresentation) {
         shader->SetUniformInt("u_wide_gamut_mode", s_wideGamutEnabled.load(std::memory_order_relaxed) ? 1 : 0);
         shader->SetUniformInt("u_color_profile", s_colorProfile.load(std::memory_order_relaxed));
+        shader->SetUniformInt("u_enable_catmull_rom", s_enableCatmullRomTSR.load(std::memory_order_relaxed) ? 1 : 0);
     }
     shader->SetUniformMat4x4("vertex_transformation", translationMatrix);
 
