@@ -1,4 +1,4 @@
-#include "Waveforms/Milkdrop2077WaveStar.hpp"
+#include "Waveforms/ModernWaveStar.hpp"
 
 #include "PerFrameContext.hpp"
 
@@ -8,12 +8,12 @@ namespace libprojectM {
 namespace MilkdropPreset {
 namespace Waveforms {
 
-bool Milkdrop2077WaveStar::IsLoop()
+bool ModernWaveStar::IsLoop()
 {
     return true;
 }
 
-void Milkdrop2077WaveStar::GenerateVertices(const PresetState& presetState,
+void ModernWaveStar::GenerateVertices(const PresetState& presetState,
                                             const PerFrameContext&)
 {
     m_samples = Audio::WaveformSamples / 2;
@@ -33,7 +33,7 @@ void Milkdrop2077WaveStar::GenerateVertices(const PresetState& presetState,
         {
             float mix = static_cast<float>(sample) / tenthSamples;
             mix = 0.5f - 0.5f * cosf(mix * 3.1416f);
-            // Subtracting the sample offset here instead of adding it, as the original Milkdrop2077 code accessed out-of-range data.
+            // Subtracting the sample offset here instead of adding it, as the original Modern waveform code accessed out-of-range data.
             float const radius2 = 0.5f + 0.4f * m_pcmDataR[sample + m_samples - sampleOffset] + m_mysteryWaveParam;
             radius = radius2 * (1.0f - mix) + radius * mix;
         }

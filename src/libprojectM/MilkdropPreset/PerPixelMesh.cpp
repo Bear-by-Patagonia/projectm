@@ -117,6 +117,8 @@ void PerPixelMesh::Draw(const PresetState& presetState,
 
 void PerPixelMesh::InitializeMesh(const PresetState& presetState)
 {
+    const bool modernMode = MilkdropShader::IsCurlNoiseEnabled();
+
     if (m_gridSizeX != presetState.renderContext.perPixelMeshX ||
         m_gridSizeY != presetState.renderContext.perPixelMeshY)
     {
@@ -137,16 +139,18 @@ void PerPixelMesh::InitializeMesh(const PresetState& presetState)
         m_hasCachedUniforms = false;
     }
     else if (m_viewportWidth == presetState.renderContext.viewportSizeX &&
-             m_viewportHeight == presetState.renderContext.viewportSizeY)
+             m_viewportHeight == presetState.renderContext.viewportSizeY &&
+             m_cachedModernMode == modernMode)
     {
         // Nothing changed, just go on to the dynamic calculation.
         return;
     }
 
+    m_cachedModernMode = modernMode;
     const float aspectX = presetState.renderContext.aspectX;
     const float aspectY = presetState.renderContext.aspectY;
 
-    // Either viewport size or mesh size changed, reinitialize the vertices.
+    // Either viewport size, mesh size, or rendering mode changed: reinitialize the vertices.
     auto& vertices = m_warpMesh.Vertices();
     int vertexIndex{0};
     for (int gridY = 0; gridY <= m_gridSizeY; gridY++)
@@ -158,10 +162,19 @@ void PerPixelMesh::InitializeMesh(const PresetState& presetState)
             vertices[vertexIndex] = {x, y};
 
             const float r = hypotf(x * aspectX, y * aspectY);
-            // Conformal Logarithmic / Hyperbolic radial transformation:
-            // r_conf = ln(1.0 + r * (e - 1.0)) smoothly maps [0, 1] to [0, 1] while enhancing
-            // central angular fidelity and preventing edge distortion pinch with 0 GPU overhead.
-            m_radiusAngleBuffer[vertexIndex].radius = std::log1p(r * 1.718281828f);
+            if (modernMode)
+            {
+                // Enhanced 3D Mode: Conformal Logarithmic + Hyperbolic Poincaré Disk geodesic mapping.
+                // Smoothly curves radial space into a 3D stereographic dome/tunnel with 0 GPU overhead.
+                const float rConf = std::log1p(r * 1.718281828f);
+                const float rPoincare = (2.0f * r) / (1.0f + r * r);
+                m_radiusAngleBuffer[vertexIndex].radius = 0.65f * rConf + 0.35f * rPoincare;
+            }
+            else
+            {
+                // Original Vintage 2001 Mode ("Rústico"): Flat Euclidean radial metric.
+                m_radiusAngleBuffer[vertexIndex].radius = r;
+            }
             if (gridY == m_gridSizeY / 2 && gridX == m_gridSizeX / 2)
             {
                 m_radiusAngleBuffer[vertexIndex].angle = 0.0f;
@@ -219,7 +232,7 @@ void PerPixelMesh::InitializeMesh(const PresetState& presetState)
 
 
 
-void PerPixelMesh::CalculateMesh([[maybe_unused]] const PresetState& presetState, const PerFrameContext& perFrameContext, PerPixelContext& perPixelContext)
+void PerPixelMesh::CalculateMesh(const PresetState& presetState, const PerFrameContext& perFrameContext, PerPixelContext& perPixelContext)
 {
     float zoom = static_cast<float>(*perFrameContext.zoom);
     float zoomExp = static_cast<float>(*perFrameContext.zoomexp);
@@ -231,6 +244,25 @@ void PerPixelMesh::CalculateMesh([[maybe_unused]] const PresetState& presetState
     float dy = static_cast<float>(*perFrameContext.dy);
     float sx = static_cast<float>(*perFrameContext.sx);
     float sy = static_cast<float>(*perFrameContext.sy);
+
+    // Time-step kinematic independence (anti-"Pac-Man Turbo" protection):
+    // When running above 60 FPS (e.g. 90Hz/120Hz displays or ultra-fast GPU frames),
+    // normalize per-frame iterative advection steps so angular, linear, and exponential
+    // velocities per real-world second remain strictly constant.
+    const float currentFps = presetState.renderContext.fps;
+    const float kappa = (currentFps > 62.0f) ? std::clamp(60.0f / currentFps, 0.25f, 1.0f) : 1.0f;
+    const bool applyTimeScale = (kappa < 0.98f);
+
+    if (applyTimeScale)
+    {
+        if (zoom > 0.001f) zoom = std::pow(zoom, kappa);
+        rot *= kappa;
+        warp *= kappa;
+        dx *= kappa;
+        dy *= kappa;
+        if (sx > 0.001f) sx = std::pow(sx, kappa);
+        if (sy > 0.001f) sy = std::pow(sy, kappa);
+    }
 
     int totalVertices = (m_gridSizeY + 1) * (m_gridSizeX + 1);
 
@@ -324,13 +356,61 @@ void PerPixelMesh::CalculateMesh([[maybe_unused]] const PresetState& presetState
 
         perPixelContext.ExecutePerPixelCode();
 
-        curZoomRotWarp.zoom = static_cast<float>(*perPixelContext.zoom);
-        curZoomRotWarp.zoomExp = static_cast<float>(*perPixelContext.zoomexp);
-        curZoomRotWarp.rot = static_cast<float>(*perPixelContext.rot);
-        curZoomRotWarp.warp = static_cast<float>(*perPixelContext.warp);
+        float vZoom = static_cast<float>(*perPixelContext.zoom);
+        float vZoomExp = static_cast<float>(*perPixelContext.zoomexp);
+        float vRot = static_cast<float>(*perPixelContext.rot);
+        float vWarp = static_cast<float>(*perPixelContext.warp);
+        float vDx = static_cast<float>(*perPixelContext.dx);
+        float vDy = static_cast<float>(*perPixelContext.dy);
+        float vSx = static_cast<float>(*perPixelContext.sx);
+        float vSy = static_cast<float>(*perPixelContext.sy);
+
+        if (applyTimeScale)
+        {
+            if (vZoom > 0.001f) vZoom = std::pow(vZoom, kappa);
+            vRot *= kappa;
+            vWarp *= kappa;
+            vDx *= kappa;
+            vDy *= kappa;
+            if (vSx > 0.001f) vSx = std::pow(vSx, kappa);
+            if (vSy > 0.001f) vSy = std::pow(vSy, kappa);
+        }
+
+        curZoomRotWarp.zoom = vZoom;
+        curZoomRotWarp.zoomExp = vZoomExp;
+        curZoomRotWarp.rot = vRot;
+        curZoomRotWarp.warp = vWarp;
         curCenter = {static_cast<float>(*perPixelContext.cx), static_cast<float>(*perPixelContext.cy)};
-        curDistance = {static_cast<float>(*perPixelContext.dx), static_cast<float>(*perPixelContext.dy)};
-        curStretch = {static_cast<float>(*perPixelContext.sx), static_cast<float>(*perPixelContext.sy)};
+        curDistance = {vDx, vDy};
+        curStretch = {vSx, vSy};
+    }
+
+    // Phase unwrapping & mesh seam smoothing:
+    // Across the polar branch cut (y = 0, x < 0), angle jumps by 2*pi.
+    // If a preset formula multiplies or adds 'ang' to 'rot', adjacent vertices
+    // across the horizontal seam differ by > pi. In GPU hardware interpolation,
+    // this causes an inverted 360-degree polygon flip and visual screen tear.
+    // Unwrapping the phase ensures shortest-arc interpolation, completely eliminating
+    // the horizontal seam jump while preserving exact rotation angles.
+    int const midY = m_gridSizeY / 2;
+    int const midX = m_gridSizeX / 2;
+    if (midY > 0)
+    {
+        for (int gx = 0; gx < midX; ++gx)
+        {
+            int const upperIdx = gx + midY * (m_gridSizeX + 1);
+            int const lowerIdx = gx + (midY - 1) * (m_gridSizeX + 1);
+
+            float const diffRot = m_zoomRotWarpBuffer[upperIdx].rot - m_zoomRotWarpBuffer[lowerIdx].rot;
+            if (diffRot > 3.14159265f)
+            {
+                m_zoomRotWarpBuffer[upperIdx].rot -= 6.2831853f;
+            }
+            else if (diffRot < -3.14159265f)
+            {
+                m_zoomRotWarpBuffer[upperIdx].rot += 6.2831853f;
+            }
+        }
     }
 
     m_zoomRotWarpBuffer.Update();

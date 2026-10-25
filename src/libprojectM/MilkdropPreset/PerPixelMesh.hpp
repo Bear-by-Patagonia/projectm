@@ -133,6 +133,7 @@ private:
     Renderer::Sampler m_perPixelSampler{GL_CLAMP_TO_EDGE, GL_LINEAR}; //!< The main texture sampler.
 
     bool m_hasCachedUniforms{false};
+    bool m_cachedModernMode{true};
     int m_cachedTotalVertices{0};
     float m_cachedZoom{0.0f};
     float m_cachedZoomExp{0.0f};

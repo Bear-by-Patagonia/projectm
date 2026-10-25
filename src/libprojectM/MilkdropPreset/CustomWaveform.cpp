@@ -148,8 +148,15 @@ void CustomWaveform::Draw(const PerFrameContext& presetPerFrameContext)
 
         m_perPointContext.ExecutePerPointCode();
 
-        m_points[sample] = Renderer::Point(static_cast<float>((*m_perPointContext.x * 2.0 - 1.0) * m_presetState.renderContext.invAspectX),
-                                           static_cast<float>((*m_perPointContext.y * -2.0 + 1.0) * m_presetState.renderContext.invAspectY));
+        float ptX = static_cast<float>(*m_perPointContext.x * 2.0 - 1.0);
+        float ptY = static_cast<float>(*m_perPointContext.y * -2.0 + 1.0);
+        if (!std::isfinite(ptX)) ptX = 0.0f;
+        if (!std::isfinite(ptY)) ptY = 0.0f;
+        ptX = std::max(-3.0f, std::min(3.0f, ptX));
+        ptY = std::max(-3.0f, std::min(3.0f, ptY));
+
+        m_points[sample] = Renderer::Point(ptX * m_presetState.renderContext.invAspectX,
+                                           ptY * m_presetState.renderContext.invAspectY);
 
         m_colors[sample] = Renderer::Color::Modulo(Renderer::Color(static_cast<float>(*m_perPointContext.r),
                                                                    static_cast<float>(*m_perPointContext.g),

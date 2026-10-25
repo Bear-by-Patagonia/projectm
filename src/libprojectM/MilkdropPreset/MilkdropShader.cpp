@@ -23,8 +23,8 @@ using libprojectM::MilkdropPreset::MilkdropStaticShaders;
 
 static bool s_hdrPeakModeEnabled = true;
 static bool s_fp16PrecisionEnabled = false;
-static bool s_curlNoiseEnabled = false;
-static bool s_catmullRomEnabled = false;
+static bool s_curlNoiseEnabled = true;
+static bool s_catmullRomEnabled = true;
 
 void MilkdropShader::SetHdrPeakModeEnabled(bool enabled)
 {
@@ -772,10 +772,25 @@ void MilkdropShader::TranspileHLSLShader(const PresetState& presetState, std::st
 
     if (s_catmullRomEnabled && m_type == ShaderType::WarpShader)
     {
-        const std::string bicubicFunc = R"(
+        const std::string target = "texture(sampler_main,";
+        size_t tapCount = 0;
+        size_t scanPos = 0;
+        while ((scanPos = glslResult.find(target, scanPos)) != std::string::npos)
+        {
+            tapCount++;
+            scanPos += target.length();
+        }
+
+        // Only inject 4-tap Catmull-Rom bicubic interpolation when the warp shader performs
+        // 1 or 2 advection lookups. Presets that already perform 3..9 neighbor lookups for
+        // finite-difference gradients / reaction-diffusion Laplacians would explode to 16..36
+        // texture fetches per pixel and bottleneck 2-TMU mobile/TV GPUs at 30 FPS.
+        if (tapCount >= 1 && tapCount <= 2)
+        {
+            const std::string bicubicFunc = R"(
 vec4 sampleCatmullRom4Tap(sampler2D tex, vec2 uv) {
-    vec2 ts = vec2(textureSize(tex, 0));
-    vec2 its = 1.0 / ts;
+    vec2 ts = _c7.xy;
+    vec2 its = _c7.zw;
     vec2 sp = uv * ts;
     vec2 tc = floor(sp - 0.5) + 0.5;
     vec2 f = sp - tc;
@@ -787,8 +802,8 @@ vec4 sampleCatmullRom4Tap(sampler2D tex, vec2 uv) {
     vec2 w2 = 1.0 - w0 - w1 - w3;
     vec2 s0 = w0 + w1;
     vec2 s1 = w2 + w3;
-    vec2 f0 = w1 / s0;
-    vec2 f1 = w3 / s1;
+    vec2 f0 = w1 / max(s0, vec2(1e-5));
+    vec2 f1 = w3 / max(s1, vec2(1e-5));
     vec2 t0 = (tc - 1.0 + f0) * its;
     vec2 t1 = (tc + 1.0 + f1) * its;
     return (texture(tex, vec2(t0.x, t0.y)) * (s0.x * s0.y) +
@@ -797,19 +812,19 @@ vec4 sampleCatmullRom4Tap(sampler2D tex, vec2 uv) {
             texture(tex, vec2(t1.x, t1.y)) * (s1.x * s1.y));
 }
 )";
-        size_t mainPos = glslResult.find("void main()");
-        if (mainPos != std::string::npos)
-        {
-            glslResult.insert(mainPos, bicubicFunc);
-            const std::string target = "texture(sampler_main,";
-            const std::string replacement = "sampleCatmullRom4Tap(sampler_main,";
-            size_t pos = 0;
-            while ((pos = glslResult.find(target, pos)) != std::string::npos)
+            size_t mainPos = glslResult.find("void main()");
+            if (mainPos != std::string::npos)
             {
-                glslResult.replace(pos, target.length(), replacement);
-                pos += replacement.length();
+                glslResult.insert(mainPos, bicubicFunc);
+                const std::string replacement = "sampleCatmullRom4Tap(sampler_main,";
+                size_t pos = 0;
+                while ((pos = glslResult.find(target, pos)) != std::string::npos)
+                {
+                    glslResult.replace(pos, target.length(), replacement);
+                    pos += replacement.length();
+                }
+                LOG_INFO("[MilkdropShader] Catmull-Rom 4-Tap bicubic advection injected for warp shader");
             }
-            LOG_INFO("[MilkdropShader] Catmull-Rom 4-Tap bicubic advection injected for warp shader");
         }
     }
 

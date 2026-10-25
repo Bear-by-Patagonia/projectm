@@ -4,6 +4,7 @@
 #include "PerFrameContext.hpp"
 
 #include <Logging.hpp>
+#include <cmath>
 
 #define REG_VAR(var) \
     var = projectm_eval_context_register_variable(perPixelCodeContext, #var);
@@ -86,16 +87,22 @@ void PerPixelContext::LoadStateReadOnlyVariables(PresetState& state, PerFrameCon
     *meshy = static_cast<PRJM_EVAL_F>(state.renderContext.perPixelMeshY);
     *pixelsx = static_cast<PRJM_EVAL_F>(state.renderContext.viewportSizeX);
     *pixelsy = static_cast<PRJM_EVAL_F>(state.renderContext.viewportSizeY);
-    *aspectx = static_cast<PRJM_EVAL_F>(state.renderContext.aspectX);
-    *aspecty = static_cast<PRJM_EVAL_F>(state.renderContext.aspectY);
+    *aspectx = static_cast<PRJM_EVAL_F>(state.renderContext.invAspectX);
+    *aspecty = static_cast<PRJM_EVAL_F>(state.renderContext.invAspectY);
 }
 
 void PerPixelContext::LoadPerFrameQVariables(PresetState& state, PerFrameContext& perFrameState)
 {
     for (int q = 0; q < QVarCount; q++)
     {
-        state.frameQVariables[q] = *perFrameState.q_vars[q];
-        *q_vars[q] = *perFrameState.q_vars[q];
+        PRJM_EVAL_F qVal = *perFrameState.q_vars[q];
+        if (!std::isfinite(qVal))
+        {
+            qVal = static_cast<PRJM_EVAL_F>(0.0);
+            *perFrameState.q_vars[q] = qVal;
+        }
+        state.frameQVariables[q] = qVal;
+        *q_vars[q] = qVal;
     }
 }
 

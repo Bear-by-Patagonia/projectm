@@ -6,11 +6,8 @@ namespace libprojectM {
 namespace MilkdropPreset {
 namespace Waveforms {
 
-class Milkdrop2077WaveFlower : public WaveformMath
+class ModernWaveSkewed : public WaveformMath
 {
-public:
-    auto IsLoop() -> bool override;
-
 protected:
     void GenerateVertices(const PresetState& presetState,
                           const PerFrameContext& presetPerFrameContext) override;

@@ -87,9 +87,10 @@ private:
 
     Band m_band{Band::Bass}; //!< The frequency band to use for this instance.
 
-    float m_current{};     //!< The current frame's sum of all frequency strengths in the current band.
-    float m_average{};     //!< The short-term averaged value of m_current.
-    float m_longAverage{}; //!< The long-term averaged value of m_current.
+    float m_current{};       //!< The current frame's sum of all frequency strengths in the current band.
+    float m_prevRawEnergy{}; //!< Previous frame's raw band energy for half-wave rectified spectral flux.
+    float m_average{};       //!< The short-term averaged value of m_current.
+    float m_longAverage{};   //!< The long-term averaged value of m_current.
 
     float m_currentRelative{1.0f}; //!< The relative loudness value to the previous frame.
     float m_averageRelative{1.0f}; //!< The attenuated relative loudness value.

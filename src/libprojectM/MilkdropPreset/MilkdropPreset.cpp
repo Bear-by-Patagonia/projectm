@@ -233,7 +233,17 @@ void MilkdropPreset::PerFrameUpdate()
     m_perFrameContext.LoadStateVariables(m_state);
     m_perPixelContext.LoadStateReadOnlyVariables(m_state, m_perFrameContext);
 
+    const double preExecDecay = *m_perFrameContext.decay;
     m_perFrameContext.ExecutePerFrameCode();
+
+    // If per_frame script overwrote decay directly (e.g. `decay = 0.96`), normalize it to real-time FPS
+    // so high framerates never cause premature fade-to-black.
+    const double postExecDecay = *m_perFrameContext.decay;
+    const double instantFps = static_cast<double>(m_state.renderContext.fps);
+    if (std::abs(postExecDecay - preExecDecay) > 1e-6 && instantFps > 1.0 && postExecDecay > 0.0 && postExecDecay < 1.0)
+    {
+        *m_perFrameContext.decay = static_cast<PRJM_EVAL_F>(std::pow(postExecDecay, 60.0 / instantFps));
+    }
 
     m_perPixelContext.LoadPerFrameQVariables(m_state, m_perFrameContext);
 

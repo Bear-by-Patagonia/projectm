@@ -79,8 +79,35 @@ auto WaveformMath::GetVertices(const PresetState& presetState,
         m_mysteryWaveParam = m_mysteryWaveParam * 2 - 1;
     }
 
-    m_waveX = 2.0f * static_cast<float>(*presetPerFrameContext.wave_x) - 1.0f;
-    m_waveY = 2.0f * static_cast<float>(*presetPerFrameContext.wave_y) - 1.0f;
+    float const targetWaveX = 2.0f * static_cast<float>(*presetPerFrameContext.wave_x) - 1.0f;
+    float const targetWaveY = 2.0f * static_cast<float>(*presetPerFrameContext.wave_y) - 1.0f;
+
+    if (!m_hasPrevWavePos)
+    {
+        m_prevWaveX = targetWaveX;
+        m_prevWaveY = targetWaveY;
+        m_hasPrevWavePos = true;
+    }
+
+    // Kinematic continuity filter: mitigates erratic 1-frame screen jumps caused by beat-triggered rand()
+    // or unbuffered boundary wraps in classic presets while preserving exact author positioning.
+    float const dxWave = targetWaveX - m_prevWaveX;
+    float const dyWave = targetWaveY - m_prevWaveY;
+    float const jumpDist = std::sqrt(dxWave * dxWave + dyWave * dyWave);
+
+    if (jumpDist > 0.25f)
+    {
+        // Smoothly glide towards target over 2-3 frames
+        m_waveX = m_prevWaveX + dxWave * 0.65f;
+        m_waveY = m_prevWaveY + dyWave * 0.65f;
+    }
+    else
+    {
+        m_waveX = targetWaveX;
+        m_waveY = targetWaveY;
+    }
+    m_prevWaveX = m_waveX;
+    m_prevWaveY = m_waveY;
 
     GenerateVertices(presetState, presetPerFrameContext);
 

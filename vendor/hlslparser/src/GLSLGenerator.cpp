@@ -150,6 +150,9 @@ GLSLGenerator::GLSLGenerator() :
     m_acosFunction[0]           = 0;
     m_asinFunction[0]           = 0;
     m_altMultFunction[0]        = 0;
+    m_altDivFunction[0]         = 0;
+    m_atan2Function[0]          = 0;
+    m_fmodFunction[0]           = 0;
     m_outputPosition            = false;
     m_outputTargets             = 0;
 }
@@ -180,6 +183,9 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
 	ChooseUniqueName( "acos", m_acosFunction, sizeof( m_acosFunction ) );
 	ChooseUniqueName( "asin", m_asinFunction, sizeof( m_asinFunction ) );
 	ChooseUniqueName( "mult", m_altMultFunction, sizeof( m_altMultFunction ) );
+	ChooseUniqueName( "sdiv", m_altDivFunction, sizeof( m_altDivFunction ) );
+	ChooseUniqueName( "dx_atan2", m_atan2Function, sizeof( m_atan2Function ) );
+	ChooseUniqueName( "dx_fmod", m_fmodFunction, sizeof( m_fmodFunction ) );
 
     for (int i = 0; i < s_numReservedWords; ++i)
     {
@@ -452,6 +458,20 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
         m_writer.WriteLine(0, "vec3 %s(vec3 x) { vec3 ret; ret.x = %s(x.x); ret.y = %s(x.y); ret.z = %s(x.z); return ret; }", m_asinFunction, m_asinFunction, m_asinFunction, m_asinFunction);
         m_writer.WriteLine(0, "vec4 %s(vec4 x) { vec4 ret; ret.x = %s(x.x); ret.y = %s(x.y); ret.z = %s(x.z); ret.w = %s(x.w); return ret; }", m_asinFunction, m_asinFunction, m_asinFunction, m_asinFunction, m_asinFunction);
     }
+    if (m_tree->NeedsFunction("atan2"))
+    {
+        m_writer.WriteLine(0, "float %s(float y, float x) { return (x == 0.0 && y == 0.0) ? 0.0 : atan(y, x); }", m_atan2Function);
+        m_writer.WriteLine(0, "vec2 %s(vec2 y, vec2 x) { return vec2(%s(y.x, x.x), %s(y.y, x.y)); }", m_atan2Function, m_atan2Function, m_atan2Function);
+        m_writer.WriteLine(0, "vec3 %s(vec3 y, vec3 x) { return vec3(%s(y.x, x.x), %s(y.y, x.y), %s(y.z, x.z)); }", m_atan2Function, m_atan2Function, m_atan2Function, m_atan2Function);
+        m_writer.WriteLine(0, "vec4 %s(vec4 y, vec4 x) { return vec4(%s(y.x, x.x), %s(y.y, x.y), %s(y.z, x.z), %s(y.w, x.w)); }", m_atan2Function, m_atan2Function, m_atan2Function, m_atan2Function, m_atan2Function);
+    }
+    if (m_tree->NeedsFunction("fmod"))
+    {
+        m_writer.WriteLine(0, "float %s(float x, float y) { return (abs(y) < 1e-7) ? 0.0 : (x - y * trunc(x / y)); }", m_fmodFunction);
+        m_writer.WriteLine(0, "vec2 %s(vec2 x, vec2 y) { return vec2(%s(x.x, y.x), %s(x.y, y.y)); }", m_fmodFunction, m_fmodFunction, m_fmodFunction);
+        m_writer.WriteLine(0, "vec3 %s(vec3 x, vec3 y) { return vec3(%s(x.x, y.x), %s(x.y, y.y), %s(x.z, y.z)); }", m_fmodFunction, m_fmodFunction, m_fmodFunction, m_fmodFunction);
+        m_writer.WriteLine(0, "vec4 %s(vec4 x, vec4 y) { return vec4(%s(x.x, y.x), %s(x.y, y.y), %s(x.z, y.z), %s(x.w, y.w)); }", m_fmodFunction, m_fmodFunction, m_fmodFunction, m_fmodFunction, m_fmodFunction);
+    }
 
     if (m_options.flags & Flag_AlternateNanPropagation) {
         /* Implement alternate functions that propagate NaNs like shader model 3 and DX9. */
@@ -467,6 +487,13 @@ bool GLSLGenerator::Generate(HLSLTree* tree, Target target, Version version, con
         m_writer.WriteLine(0, "mat3 %s(mat3 x, mat3 y) { return x * y; }", m_altMultFunction);
         m_writer.WriteLine(0, "mat4 %s(mat4 x, mat4 y) { return x * y; }", m_altMultFunction);
 
+        // Sign-preserving safe division for DirectX 9 3D projection compatibility (prevents Inf/NaN feedback blackouts)
+        m_writer.WriteLine(0, "int %s(int x, int y) { return (y == 0) ? 0 : (x / y); }", m_altDivFunction);
+        m_writer.WriteLine(0, "uint %s(uint x, uint y) { return (y == 0u) ? 0u : (x / y); }", m_altDivFunction);
+        m_writer.WriteLine(0, "float %s(float x, float y) { if (x == 0.0) return 0.0; float sy = (abs(y) < 1e-7) ? (y < 0.0 ? -1e-7 : 1e-7) : y; return x / sy; }", m_altDivFunction);
+        m_writer.WriteLine(0, "vec2 %s(vec2 x, vec2 y) { return vec2(%s(x.x, y.x), %s(x.y, y.y)); }", m_altDivFunction, m_altDivFunction, m_altDivFunction);
+        m_writer.WriteLine(0, "vec3 %s(vec3 x, vec3 y) { return vec3(%s(x.x, y.x), %s(x.y, y.y), %s(x.z, y.z)); }", m_altDivFunction, m_altDivFunction, m_altDivFunction, m_altDivFunction);
+        m_writer.WriteLine(0, "vec4 %s(vec4 x, vec4 y) { return vec4(%s(x.x, y.x), %s(x.y, y.y), %s(x.z, y.z), %s(x.w, y.w)); }", m_altDivFunction, m_altDivFunction, m_altDivFunction, m_altDivFunction, m_altDivFunction);
     }
 
     m_writer.WriteLine(0, "vec2  %s(float x) { return  vec2(x, x); }", m_scalarSwizzle2Function);
@@ -792,6 +819,13 @@ void GLSLGenerator::OutputExpression(HLSLExpression* expression, const HLSLType*
                         OutputExpression(binaryExpression->expression2, dstType2);
                         m_writer.Write(")");
                         handled = true;
+                    } else if (binaryExpression->binaryOp == HLSLBinaryOp_Div) {
+                        m_writer.Write("%s(", m_altDivFunction);
+                        OutputExpression(binaryExpression->expression1, dstType1);
+                        m_writer.Write(", ");
+                        OutputExpression(binaryExpression->expression2, dstType2);
+                        m_writer.Write(")");
+                        handled = true;
                     }
                 }
 
@@ -1008,30 +1042,37 @@ void GLSLGenerator::OutputExpression(HLSLExpression* expression, const HLSLType*
             /* The documentation says that these functions return NaN for negative
              * arguments. However, testing with DX9 shader model 3 shows that they
              * most definitely do take the absolute value of the argument and do
-             * NOT return NaN.
+             * NOT return NaN. Also guard against 0.0 to prevent Inf/NaN feedback corruption.
              * See https://github.com/projectM-visualizer/projectm/issues/724
              */
-            m_writer.Write("inversesqrt(abs(");
+            m_writer.Write("inversesqrt(max(abs(");
+            OutputExpressionList(functionCall->argument, functionCall->function->argument);
+            m_writer.Write("), 1e-12))");
+            handled = true;
+        }
+        else if (String_Equal(functionName, "sqrt"))
+        {
+            /* See rsqrt above */
+            m_writer.Write("sqrt(abs(");
             OutputExpressionList(functionCall->argument, functionCall->function->argument);
             m_writer.Write("))");
             handled = true;
         }
-        else if (String_Equal(functionName, "sqrt") ||
-            String_Equal(functionName, "log") ||
+        else if (String_Equal(functionName, "log") ||
             String_Equal(functionName, "log2"))
         {
-            /* See rsqrt above */
-            m_writer.Write("%s(abs(", functionName);
+            /* Guard against 0.0 (e.g. log(rad) at screen center) as well as negative values */
+            m_writer.Write("%s(max(abs(", functionName);
             OutputExpressionList(functionCall->argument, functionCall->function->argument);
-            m_writer.Write("))");
+            m_writer.Write("), 1e-12))");
             handled = true;
         }
         else if (String_Equal(functionName, "log10"))
         {
-            /* See rsqrt above regarding abs(). */
-            m_writer.Write("(log(abs(");
+            /* See rsqrt above regarding abs() and 0.0 guard. */
+            m_writer.Write("(log(max(abs(");
             OutputExpressionList(functionCall->argument, functionCall->function->argument);
-            m_writer.Write("))/log(10.0))");
+            m_writer.Write("), 1e-12))/log(10.0))");
             handled = true;
         }
         else if (String_Equal(functionName, "pow"))
@@ -1086,12 +1127,12 @@ void GLSLGenerator::OutputExpression(HLSLExpression* expression, const HLSLType*
                 }
             }
 
-            // Other cases, including variable exponent arguments, will still call pow().
+            // Other cases, including variable exponent arguments, will still call pow() with zero-guard.
             if (!handled)
             {
-                m_writer.Write("pow(abs(");
+                m_writer.Write("pow(max(abs(");
                 OutputExpression(argument[0], &functionCall->function->returnType);
-                m_writer.Write("),");
+                m_writer.Write("), 1e-12),");
                 OutputExpression(argument[1], &functionCall->function->returnType);
                 m_writer.Write(")");
                 handled = true;
@@ -1190,7 +1231,7 @@ void GLSLGenerator::OutputIdentifier(const char* name)
 	}
     else if (String_Equal(name, "atan2"))
     {
-        name = "atan";
+        name = m_atan2Function;
     }
     else if (String_Equal(name, "sincos"))
     {
@@ -1198,10 +1239,7 @@ void GLSLGenerator::OutputIdentifier(const char* name)
     }
     else if (String_Equal(name, "fmod"))
     {
-        // mod is not the same as fmod if the parameter is negative!
-        // The equivalent of fmod(x, y) is x - y * floor(x/y)
-        // We use the mod version for performance.
-        name = "mod";
+        name = m_fmodFunction;
     }
     else if (String_Equal(name, "lerp"))
     {

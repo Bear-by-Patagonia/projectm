@@ -1,4 +1,4 @@
-#include "Waveforms/Milkdrop2077WaveLasso.hpp"
+#include "Waveforms/ModernWaveLasso.hpp"
 
 #include "PerFrameContext.hpp"
 
@@ -8,7 +8,7 @@ namespace libprojectM {
 namespace MilkdropPreset {
 namespace Waveforms {
 
-void Milkdrop2077WaveLasso::GenerateVertices(const PresetState& presetState,
+void ModernWaveLasso::GenerateVertices(const PresetState& presetState,
                                              const PerFrameContext&)
 {
     m_samples = Audio::WaveformSamples / 2;

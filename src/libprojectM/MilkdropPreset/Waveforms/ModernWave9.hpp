@@ -6,7 +6,7 @@ namespace libprojectM {
 namespace MilkdropPreset {
 namespace Waveforms {
 
-class Milkdrop2077WaveX : public LineBase
+class ModernWave9 : public LineBase
 {
 protected:
     void GenerateVertices(const PresetState& presetState, const PerFrameContext& presetPerFrameContext) override;

@@ -1,4 +1,4 @@
-#include "Waveforms/Milkdrop2077WaveFlower.hpp"
+#include "Waveforms/ModernWaveFlower.hpp"
 
 #include "PerFrameContext.hpp"
 
@@ -8,12 +8,12 @@ namespace libprojectM {
 namespace MilkdropPreset {
 namespace Waveforms {
 
-bool Milkdrop2077WaveFlower::IsLoop()
+bool ModernWaveFlower::IsLoop()
 {
     return true;
 }
 
-void Milkdrop2077WaveFlower::GenerateVertices(const PresetState& presetState,
+void ModernWaveFlower::GenerateVertices(const PresetState& presetState,
                                               const PerFrameContext&)
 {
     m_samples = Audio::WaveformSamples / 2;
@@ -34,7 +34,7 @@ void Milkdrop2077WaveFlower::GenerateVertices(const PresetState& presetState,
             float mix = static_cast<float>(sample) / tenthSamples;
             // Flower
             mix = 0.7f - 0.7f * cosf(mix * 3.1416f);
-            // Subtracting the sample offset here instead of adding it, as the original Milkdrop2077 code accessed out-of-range data.
+            // Subtracting the sample offset here instead of adding it, as the original Modern waveform code accessed out-of-range data.
             float const radius2 = 0.7f + 0.7f * m_pcmDataR[sample + m_samples - sampleOffset] + m_mysteryWaveParam;
             radius = radius2 * (1.0f - mix) + radius * mix * .25f;
         }

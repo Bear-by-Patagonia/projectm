@@ -140,8 +140,9 @@ const mat3 kLinearSRGBToLinearP3 = mat3(
 
 void main() {
     // --- Single Texture Fetch ---
-    // Filmic CRT Overscan Compensation (1.025x micro-expansion):
-    vec2 presentationUV = (fragment_tex_coord - 0.5) / 1.025 + 0.5;
+    vec2 presentationUV = (u_wide_gamut_mode == 1)
+                          ? ((fragment_tex_coord - 0.5) / 1.025 + 0.5)
+                          : fragment_tex_coord;
     vec4 src = texture(texture_sampler, presentationUV);
 
     vec3 rgb = clamp(src.rgb, 0.0, 1.0);
@@ -150,7 +151,31 @@ void main() {
     if (u_wide_gamut_mode == 1) {
         vec3 linColor = sRGBToLinear(rgb);
 
-        // Colorimetrically exact sRGB -> Display P3 mapping (D65 aligned)
+        // 1. Register-Space Radial Optical Dispersion (0 extra texture reads):
+        // Uses hardware 2x2 quad derivatives (dFdx/dFdy) projected onto the radial lens vector.
+        vec2 rVec = fragment_tex_coord - vec2(0.5);
+        float rSq = dot(rVec, rVec);
+        vec3 dColDx = dFdx(linColor);
+        vec3 dColDy = dFdy(linColor);
+        vec3 radialGrad = dColDx * rVec.x + dColDy * rVec.y;
+        float dispStrength = rSq * 0.45;
+        linColor.r = clamp(linColor.r + radialGrad.r * dispStrength, 0.0, 1.0);
+        linColor.b = clamp(linColor.b - radialGrad.b * dispStrength, 0.0, 1.0);
+
+        // 2. Screen-Space 3D Surface Normal Reconstruction & Blinn-Phong Micro-Relief (0 extra texture reads):
+        // Extracts luminance slope from GPU quad registers to give 2D filaments extruded 3D relief & specular glint.
+        float linLum = dot(linColor, vec3(0.2126, 0.7152, 0.0722));
+        float gx = dFdx(linLum);
+        float gy = dFdy(linLum);
+        float gradMag = min(sqrt(gx * gx + gy * gy), 0.35);
+        vec3 norm3D = normalize(vec3(-gx * 5.0, -gy * 5.0, 1.0));
+        const vec3 kHalfVec = vec3(-0.288675, 0.404145, 0.867721);
+        float ndoth = max(0.0, dot(norm3D, kHalfVec));
+        float specGlint = exp2(14.0 * log2(max(ndoth, 1e-4))) * gradMag * 0.42;
+        float bevelShade = (ndoth - 0.867721) * gradMag * 0.35;
+        linColor = clamp(linColor * (1.0 + bevelShade) + vec3(specGlint), 0.0, 1.0);
+
+        // 3. Colorimetrically exact sRGB -> Display P3 mapping (D65 aligned)
         vec3 p3Accurate = kLinearSRGBToLinearP3 * linColor;
 
         vec3 finalLinear;
@@ -158,8 +183,6 @@ void main() {
             // Vivid Mode (u_color_profile == 1, Default):
             // Controlled 20% expansion into Display P3 wide gamut, maintaining
             // 80% colorimetric fidelity to original Winamp CRT colors.
-            // Prevents oversaturation, color burning, and highlight clipping while
-            // taking advantage of OLED wide-gamut richness.
             finalLinear = mix(p3Accurate, linColor, 0.20);
         } else {
             // Natural Mode (u_color_profile == 0):
@@ -167,22 +190,30 @@ void main() {
             finalLinear = p3Accurate;
         }
 
+        // 4. Filmic Highlight Shoulder Desaturation:
+        // Prevents harsh single-channel clipping so intense plasma cores glow like 3D light sources.
+        float maxCh = max(finalLinear.r, max(finalLinear.g, finalLinear.b));
+        float peakLum = dot(finalLinear, vec3(0.2126, 0.7152, 0.0722));
+        float highlightRoll = smoothstep(0.72, 1.0, maxCh) * 0.16;
+        finalLinear = mix(finalLinear, vec3(peakLum), highlightRoll);
+
         finalLinear = clamp(finalLinear, 0.0, 1.0);
         outColor = linearToSRGB(finalLinear);
+
+        // Unified 0-Nit True Black Hermite Gate:
+        float lum = dot(outColor, vec3(0.2126, 0.7152, 0.0722));
+        float finalBlackGate = smoothstep(0.0001, 0.0010, lum);
+        outColor *= finalBlackGate;
+
+        // Edge Dissolve: 2-pixel hermite falloff at the outer bezel boundary
+        float edgeDist = min(min(fragment_tex_coord.x, 1.0 - fragment_tex_coord.x),
+                             min(fragment_tex_coord.y, 1.0 - fragment_tex_coord.y));
+        if (edgeDist < 0.0025) {
+            outColor *= smoothstep(0.0, 0.0025, edgeDist);
+        }
     } else {
+        // Original Vintage 2001 Mode ("Rústico"): Unmodified raw sRGB output
         outColor = rgb;
-    }
-
-    // Unified 0-Nit True Black Hermite Gate:
-    float lum = dot(outColor, vec3(0.2126, 0.7152, 0.0722));
-    float finalBlackGate = smoothstep(0.0001, 0.0010, lum);
-    outColor *= finalBlackGate;
-
-    // Edge Dissolve: 2-pixel hermite falloff at the outer bezel boundary
-    float edgeDist = min(min(fragment_tex_coord.x, 1.0 - fragment_tex_coord.x),
-                         min(fragment_tex_coord.y, 1.0 - fragment_tex_coord.y));
-    if (edgeDist < 0.0025) {
-        outColor *= smoothstep(0.0, 0.0025, edgeDist);
     }
 
     color = vec4(clamp(outColor, 0.0, 1.0), 1.0);

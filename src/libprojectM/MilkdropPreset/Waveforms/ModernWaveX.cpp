@@ -1,4 +1,4 @@
-#include "Waveforms/Milkdrop2077Wave11.hpp"
+#include "Waveforms/ModernWaveX.hpp"
 
 #include "PresetState.hpp"
 
@@ -7,7 +7,7 @@ namespace MilkdropPreset {
 namespace Waveforms {
 
 
-void Milkdrop2077Wave11::GenerateVertices(const PresetState& presetState, const PerFrameContext&)
+void ModernWaveX::GenerateVertices(const PresetState& presetState, const PerFrameContext&)
 {
     m_samples = Audio::WaveformSamples / 2;
 
@@ -19,15 +19,21 @@ void Milkdrop2077Wave11::GenerateVertices(const PresetState& presetState, const 
     m_wave1Vertices.resize(m_samples);
     m_wave2Vertices.resize(m_samples);
 
-    ClipWaveformEdges(1.57f);
+    ClipWaveformEdges(-0.75f + m_mysteryWaveParam * 3.15f);
 
     for (int i = 0; i < m_samples; i++)
     {
         m_wave1Vertices[i] = {
-            m_edgeX - 0.45f + m_distanceX * static_cast<float>(i) + m_perpetualDX * 0.35f * m_pcmDataL[i + m_sampleOffset],
+            m_edgeX + m_distanceX * static_cast<float>(i) + m_perpetualDX * 0.35f * m_pcmDataL[i + m_sampleOffset],
             m_edgeY + m_distanceY * static_cast<float>(i) + m_perpetualDY * 0.35f * m_pcmDataL[i + m_sampleOffset]};
+    }
+
+    ClipWaveformEdges(0.75f + m_mysteryWaveParam * 3.15f);
+
+    for (int i = 0; i < m_samples; i++)
+    {
         m_wave2Vertices[i] = {
-            m_edgeX + 0.45f + m_distanceX * static_cast<float>(i) + m_perpetualDX * 0.35f * m_pcmDataR[i + m_sampleOffset],
+            m_edgeX + m_distanceX * static_cast<float>(i) + m_perpetualDX * 0.35f * m_pcmDataR[i + m_sampleOffset],
             m_edgeY + m_distanceY * static_cast<float>(i) + m_perpetualDY * 0.35f * m_pcmDataR[i + m_sampleOffset]};
     }
 }

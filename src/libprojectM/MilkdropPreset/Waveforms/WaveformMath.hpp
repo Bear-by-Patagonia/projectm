@@ -83,6 +83,9 @@ protected:
 
     float m_waveX{0.5f};
     float m_waveY{0.5f};
+    float m_prevWaveX{0.0f};
+    float m_prevWaveY{0.0f};
+    bool m_hasPrevWavePos{false};
 
     float m_mysteryWaveParam{1.0f};
 

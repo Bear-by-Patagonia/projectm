@@ -107,8 +107,30 @@ void CustomShape::Draw()
         auto& vertexData = m_fillMesh.Vertices();
         auto& colorData = m_fillMesh.Colors();
 
-        vertexData[0] = Renderer::Point(static_cast<float>(*m_perFrameContext.x * 2.0 - 1.0),
-                                        static_cast<float>(*m_perFrameContext.y * -2.0 + 1.0));
+        float const targetX = static_cast<float>(*m_perFrameContext.x * 2.0 - 1.0);
+        float const targetY = static_cast<float>(*m_perFrameContext.y * -2.0 + 1.0);
+
+        if (instance >= static_cast<int>(m_prevInstancePos.size()))
+        {
+            m_prevInstancePos.resize(instance + 1, Renderer::Point(targetX, targetY));
+        }
+
+        // Kinematic continuity: filter out erratic 1-frame screen jumps caused by unbuffered modulo wraps or beat rand()
+        float const dxShape = targetX - m_prevInstancePos[instance].X();
+        float const dyShape = targetY - m_prevInstancePos[instance].Y();
+        float const jumpDist = std::sqrt(dxShape * dxShape + dyShape * dyShape);
+
+        float posX = targetX;
+        float posY = targetY;
+
+        if (jumpDist > 0.35f)
+        {
+            posX = m_prevInstancePos[instance].X() + dxShape * 0.65f;
+            posY = m_prevInstancePos[instance].Y() + dyShape * 0.65f;
+        }
+
+        m_prevInstancePos[instance] = Renderer::Point(posX, posY);
+        vertexData[0] = Renderer::Point(posX, posY);
 
         // x = f*255.0 & 0xFF = (f*255.0) % 256
         // f' = x/255.0 = f % (256/255)
@@ -197,13 +219,17 @@ void CustomShape::Draw()
 
             uvs[0] = Renderer::TextureUV(0.5f, 0.5f);
 
+            float const rawTexZoom = static_cast<float>(*m_perFrameContext.tex_zoom);
+            float const safeTexZoom = (std::abs(rawTexZoom) < 1e-5f) ? (rawTexZoom < 0.0f ? -1e-5f : 1e-5f) : rawTexZoom;
+            float const invTexZoom = 0.5f / safeTexZoom;
+
             for (int i = 1; i < sides + 1; i++)
             {
                 const float cornerProgress = static_cast<float>(i - 1) / static_cast<float>(sides);
                 const float angle = cornerProgress * pi * 2.0f + static_cast<float>(*m_perFrameContext.tex_ang) + pi * 0.25f;
 
-                uvs[i] = Renderer::TextureUV(0.5f + 0.5f * cosf(angle) / static_cast<float>(*m_perFrameContext.tex_zoom) * textureAspectY,
-                                             1.0f - (0.5f - 0.5f * sinf(angle) / static_cast<float>(*m_perFrameContext.tex_zoom))); // Vertical flip required!
+                uvs[i] = Renderer::TextureUV(0.5f + cosf(angle) * invTexZoom * textureAspectY,
+                                             1.0f - (0.5f - sinf(angle) * invTexZoom)); // Vertical flip required!
             }
 
             uvs[sides + 1] = uvs[1];

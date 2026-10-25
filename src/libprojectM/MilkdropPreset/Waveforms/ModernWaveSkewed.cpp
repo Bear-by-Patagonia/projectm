@@ -1,4 +1,4 @@
-#include "Waveforms/Milkdrop2077WaveSkewed.hpp"
+#include "Waveforms/ModernWaveSkewed.hpp"
 
 #include "PerFrameContext.hpp"
 
@@ -9,7 +9,7 @@ namespace libprojectM {
 namespace MilkdropPreset {
 namespace Waveforms {
 
-void Milkdrop2077WaveSkewed::GenerateVertices(const PresetState& presetState,
+void ModernWaveSkewed::GenerateVertices(const PresetState& presetState,
                                               const PerFrameContext& presetPerFrameContext)
 {
     m_samples = Audio::WaveformSamples / 2;

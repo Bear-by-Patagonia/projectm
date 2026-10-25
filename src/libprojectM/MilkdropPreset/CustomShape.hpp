@@ -89,6 +89,8 @@ private:
     PresetState& m_presetState; //!< The global preset state.
     ShapePerFrameContext m_perFrameContext;
 
+    std::vector<Renderer::Point> m_prevInstancePos;
+
     friend class ShapePerFrameContext;
 };
 

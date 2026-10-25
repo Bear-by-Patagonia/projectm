@@ -1,5 +1,6 @@
 #include "Waveform.hpp"
 
+#include "MilkdropShader.hpp"
 #include "PerFrameContext.hpp"
 #include "PresetState.hpp"
 
@@ -94,10 +95,43 @@ void Waveform::Draw(const PerFrameContext& presetPerFrameContext)
             m_waveMesh.Indices().MakeContinuous();
         }
 
+        const bool modernNeonTube = MilkdropShader::IsCurlNoiseEnabled() && (iterations == 4);
+        float baseWaveR = static_cast<float>(*presetPerFrameContext.wave_r);
+        float baseWaveG = static_cast<float>(*presetPerFrameContext.wave_g);
+        float baseWaveB = static_cast<float>(*presetPerFrameContext.wave_b);
+        if (modernNeonTube && *presetPerFrameContext.wave_brighten > 0)
+        {
+            const float maxC = std::max({baseWaveR, baseWaveG, baseWaveB});
+            if (maxC > 0.01f)
+            {
+                baseWaveR /= maxC;
+                baseWaveG /= maxC;
+                baseWaveB /= maxC;
+            }
+        }
+
         // If thick outline is used, draw the shape four times with slight offsets
         // (top left, top right, bottom right, bottom left).
         for (auto iteration = 0; iteration < iterations; iteration++)
         {
+            if (modernNeonTube)
+            {
+                if (iteration == 0)
+                {
+                    // Incandescent 3D cylindrical neon tube core
+                    glVertexAttrib4f(1,
+                                     std::min(1.0f, baseWaveR * 0.80f + 0.20f),
+                                     std::min(1.0f, baseWaveG * 0.80f + 0.20f),
+                                     std::min(1.0f, baseWaveB * 0.80f + 0.20f),
+                                     m_tempAlpha);
+                }
+                else if (iteration == 1)
+                {
+                    // Outer plasma sheath halo
+                    glVertexAttrib4f(1, baseWaveR, baseWaveG, baseWaveB, m_tempAlpha * 0.62f);
+                }
+            }
+
             switch (iteration)
             {
                 case 0:

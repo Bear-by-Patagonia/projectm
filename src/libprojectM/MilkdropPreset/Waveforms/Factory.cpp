@@ -6,13 +6,13 @@
 #include "Waveforms/DoubleLine.hpp"
 #include "Waveforms/ExplosiveHash.hpp"
 #include "Waveforms/Line.hpp"
-#include "Waveforms/Milkdrop2077Wave11.hpp"
-#include "Waveforms/Milkdrop2077Wave9.hpp"
-#include "Waveforms/Milkdrop2077WaveFlower.hpp"
-#include "Waveforms/Milkdrop2077WaveLasso.hpp"
-#include "Waveforms/Milkdrop2077WaveSkewed.hpp"
-#include "Waveforms/Milkdrop2077WaveStar.hpp"
-#include "Waveforms/Milkdrop2077WaveX.hpp"
+#include "Waveforms/ModernWave11.hpp"
+#include "Waveforms/ModernWave9.hpp"
+#include "Waveforms/ModernWaveFlower.hpp"
+#include "Waveforms/ModernWaveLasso.hpp"
+#include "Waveforms/ModernWaveSkewed.hpp"
+#include "Waveforms/ModernWaveStar.hpp"
+#include "Waveforms/ModernWaveX.hpp"
 #include "Waveforms/SpectrumLine.hpp"
 #include "Waveforms/XYOscillationSpiral.hpp"
 
@@ -50,26 +50,26 @@ auto Factory::Create(WaveformMode mode) -> std::unique_ptr<WaveformMath>
         case WaveformMode::SpectrumLine:
             return std::make_unique<SpectrumLine>();
 
-        case WaveformMode::Milkdrop2077Wave9:
-            return std::make_unique<Milkdrop2077Wave9>();
+        case WaveformMode::ModernWave9:
+            return std::make_unique<ModernWave9>();
 
-        case WaveformMode::Milkdrop2077WaveX:
-            return std::make_unique<Milkdrop2077WaveX>();
+        case WaveformMode::ModernWaveX:
+            return std::make_unique<ModernWaveX>();
 
-        case WaveformMode::Milkdrop2077Wave11:
-            return std::make_unique<Milkdrop2077Wave11>();
+        case WaveformMode::ModernWave11:
+            return std::make_unique<ModernWave11>();
 
-        case WaveformMode::Milkdrop2077WaveSkewed:
-            return std::make_unique<Milkdrop2077WaveSkewed>();
+        case WaveformMode::ModernWaveSkewed:
+            return std::make_unique<ModernWaveSkewed>();
 
-        case WaveformMode::Milkdrop2077WaveStar:
-            return std::make_unique<Milkdrop2077WaveStar>();
+        case WaveformMode::ModernWaveStar:
+            return std::make_unique<ModernWaveStar>();
 
-        case WaveformMode::Milkdrop2077WaveFlower:
-            return std::make_unique<Milkdrop2077WaveFlower>();
+        case WaveformMode::ModernWaveFlower:
+            return std::make_unique<ModernWaveFlower>();
 
-        case WaveformMode::Milkdrop2077WaveLasso:
-            return std::make_unique<Milkdrop2077WaveLasso>();
+        case WaveformMode::ModernWaveLasso:
+            return std::make_unique<ModernWaveLasso>();
 
         case WaveformMode::Count:
             break;
