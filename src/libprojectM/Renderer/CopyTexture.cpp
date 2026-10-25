@@ -128,23 +128,19 @@ uniform int u_enable_catmull_rom;
 
 out vec4 color;
 
-// Fast power-curve gamma approximation (single-cycle FMA execution on mobile/TV GPUs)
+// Fast and accurate sRGB to Linear conversion
 vec3 sRGBToLinear(vec3 c) {
-    return c * (c * 0.94 + 0.06);
+    vec3 linearLow = c / 12.92;
+    vec3 linearHigh = exp2(vec3(2.4) * log2(max((c + vec3(0.055)) / 1.055, vec3(1e-6))));
+    return mix(linearHigh, linearLow, step(c, vec3(0.04045)));
 }
 
-// Fast Linear to sRGB conversion (single-cycle hardware sqrt)
+// Fast and accurate Linear to sRGB conversion
 vec3 linearToSRGB(vec3 c) {
-    return sqrt(max(c, vec3(0.0)));
+    vec3 sRGBLow = c * 12.92;
+    vec3 sRGBHigh = 1.055 * exp2(vec3(1.0 / 2.4) * log2(max(c, vec3(1e-6)))) - vec3(0.055);
+    return mix(sRGBHigh, sRGBLow, step(c, vec3(0.0031308)));
 }
-
-// Standard Colorimetric Linear sRGB to Linear Display P3 (D65) Conversion Matrix
-// Preserves exact original Winamp CRT sRGB chromaticity coordinates on wide-gamut Display P3 panels.
-const mat3 kLinearSRGBToLinearP3 = mat3(
-    vec3(0.8224621, 0.0331941, 0.0170827),
-    vec3(0.1775380, 0.9668059, 0.0723974),
-    vec3(0.0000000, 0.0000000, 0.9105199)
-);
 
 // Fast 5-tap Catmull-Rom Bicubic Super-Resolution Reconstruction Filter
 // Reconstructs subpixel high-frequency details during Dynamic Resolution Scaling (DRS) upscaling
@@ -177,10 +173,8 @@ vec4 sampleCatmullRom(sampler2D tex, vec2 uv, vec2 texSize) {
 }
 
 void main() {
-    // --- Texture Fetch (Adaptive Catmull-Rom TSR Reconstruction) ---
-    vec2 presentationUV = (u_wide_gamut_mode == 1)
-                          ? ((fragment_tex_coord - 0.5) / 1.025 + 0.5)
-                          : fragment_tex_coord;
+    // Exact 1:1 presentation coordinate mapping (no crop / overscan distortion)
+    vec2 presentationUV = fragment_tex_coord;
 
     vec4 src;
     if (u_enable_catmull_rom == 1) {
@@ -200,52 +194,12 @@ void main() {
     if (u_wide_gamut_mode == 1) {
         vec3 linColor = sRGBToLinear(rgb);
 
-        // Micro-relief specular glint & radial optical dispersion:
-        // Engaged exclusively on multi-core flagship GPUs (u_enable_catmull_rom == 1)
-        // to protect 2-core TV boxes (Mali-G31) from TMU and ALU register stalls.
-        if (u_enable_catmull_rom == 1) {
-            vec2 rVec = fragment_tex_coord - vec2(0.5);
-            float rSq = dot(rVec, rVec);
-            vec3 dColDx = dFdx(linColor);
-            vec3 dColDy = dFdy(linColor);
-            vec3 radialGrad = dColDx * rVec.x + dColDy * rVec.y;
-            float dispStrength = rSq * 0.45;
-            linColor.r = clamp(linColor.r + radialGrad.r * dispStrength, 0.0, 1.0);
-            linColor.b = clamp(linColor.b - radialGrad.b * dispStrength, 0.0, 1.0);
-
-            float linLum = dot(linColor, vec3(0.2126, 0.7152, 0.0722));
-            float gx = dFdx(linLum);
-            float gy = dFdy(linLum);
-            float gradMag = min(sqrt(gx * gx + gy * gy), 0.35);
-            vec3 norm3D = normalize(vec3(-gx * 5.0, -gy * 5.0, 1.0));
-            const vec3 kHalfVec = vec3(-0.288675, 0.404145, 0.867721);
-            float ndoth = max(0.0, dot(norm3D, kHalfVec));
-            float specGlint = exp2(14.0 * log2(max(ndoth, 1e-4))) * gradMag * 0.42;
-            float bevelShade = (ndoth - 0.867721) * gradMag * 0.35;
-            linColor = clamp(linColor * (1.0 + bevelShade) + vec3(specGlint), 0.0, 1.0);
-        }
-
-        // 3. Colorimetrically exact sRGB -> Display P3 mapping (D65 aligned)
-        vec3 p3Accurate = kLinearSRGBToLinearP3 * linColor;
-
-        vec3 finalLinear;
+        vec3 finalLinear = linColor;
         if (u_color_profile == 1) {
-            // Vivid Mode (u_color_profile == 1, Default):
-            // Controlled 20% expansion into Display P3 wide gamut, maintaining
-            // 80% colorimetric fidelity to original Winamp CRT colors.
-            finalLinear = mix(p3Accurate, linColor, 0.20);
-        } else {
-            // Natural Mode (u_color_profile == 0):
-            // 100% faithful to original Winamp CRT sRGB color space.
-            finalLinear = p3Accurate;
+            // Vivid Mode: Rich contrast and clean vibrant colors without highlight bleaching
+            float lum = dot(linColor, vec3(0.2126, 0.7152, 0.0722));
+            finalLinear = mix(vec3(lum), linColor, 1.15); // Pure 15% chromatic saturation pop
         }
-
-        // 4. Filmic Highlight Shoulder Desaturation:
-        // Prevents harsh single-channel clipping so intense plasma cores glow like 3D light sources.
-        float maxCh = max(finalLinear.r, max(finalLinear.g, finalLinear.b));
-        float peakLum = dot(finalLinear, vec3(0.2126, 0.7152, 0.0722));
-        float highlightRoll = smoothstep(0.72, 1.0, maxCh) * 0.16;
-        finalLinear = mix(finalLinear, vec3(peakLum), highlightRoll);
 
         finalLinear = clamp(finalLinear, 0.0, 1.0);
         outColor = linearToSRGB(finalLinear);

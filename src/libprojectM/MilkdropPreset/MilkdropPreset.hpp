@@ -132,6 +132,14 @@ private:
 
     bool m_isFirstFrame{true}; //!< Controls drawing the motion vectors starting with the second frame.
     bool m_hasValidMotionVectorUVMap{false}; //!< True when m_motionVectorUVMap contains valid UVs from the previous frame.
+
+    bool m_hasPrevCameraMotion{false};
+    double m_prevDx{0.0};
+    double m_prevDy{0.0};
+    double m_prevZoom{1.0};
+    double m_prevRot{0.0};
+    double m_prevCx{0.5};
+    double m_prevCy{0.5};
 };
 
 } // namespace MilkdropPreset

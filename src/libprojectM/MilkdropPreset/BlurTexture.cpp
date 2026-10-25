@@ -351,10 +351,8 @@ void BlurTexture::AllocateTextures(const Renderer::Texture& sourceTexture)
             textureName = "blur" + std::to_string(i / 2 + 1);
         }
 
-        // Selective Quantization (NVIDIA AWQ-inspired):
-        // Use 16-bit packed RGB565 for blur passes to halve DRAM read/write bandwidth without visual degradation
-        m_blurTextures[i] = std::make_shared<Renderer::Texture>(textureName, GL_TEXTURE_2D, width2, height2, 1,
-                                                                GL_RGB565, GL_RGB, GL_UNSIGNED_SHORT_5_6_5, false);
+        // Standard 8-bit precision texture to prevent color banding and bloom clipping
+        m_blurTextures[i] = std::make_shared<Renderer::Texture>(textureName, width2, height2, false);
     }
 
     m_sourceTextureWidth = sourceTexture.Width();

@@ -145,9 +145,6 @@ private:
     float m_cachedDy{0.0f};
     float m_cachedSx{0.0f};
     float m_cachedSy{0.0f};
-
-    bool m_enable24Sparsity{true}; //!< NVIDIA 2:4 Structured Sparsity for per-pixel mesh calculations
-    int m_sparsityFrameIndex{0};
 };
 
 } // namespace MilkdropPreset

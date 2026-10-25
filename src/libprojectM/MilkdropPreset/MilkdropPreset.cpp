@@ -248,6 +248,80 @@ void MilkdropPreset::PerFrameUpdate()
         *m_perFrameContext.decay = static_cast<PRJM_EVAL_F>(std::pow(postExecDecay, 60.0 / instantFps));
     }
 
+    // Kinematic Slew-Rate Limiter (Anti-saltos bruscos manteniendo el efecto original):
+    // Smooths out single-frame camera teleport spikes caused by unbuffered modulo wrap or abrupt jump logic
+    if (m_perFrameContext.dx && m_perFrameContext.dy && m_perFrameContext.zoom && m_perFrameContext.rot)
+    {
+        double curDx = *m_perFrameContext.dx;
+        double curDy = *m_perFrameContext.dy;
+        double curZoom = *m_perFrameContext.zoom;
+        double curRot = *m_perFrameContext.rot;
+        double curCx = m_perFrameContext.cx ? *m_perFrameContext.cx : 0.5;
+        double curCy = m_perFrameContext.cy ? *m_perFrameContext.cy : 0.5;
+
+        if (!std::isfinite(curDx)) curDx = 0.0;
+        if (!std::isfinite(curDy)) curDy = 0.0;
+        if (!std::isfinite(curZoom) || curZoom <= 0.001) curZoom = 1.0;
+        if (!std::isfinite(curRot)) curRot = 0.0;
+        if (!std::isfinite(curCx)) curCx = 0.5;
+        if (!std::isfinite(curCy)) curCy = 0.5;
+
+        if (m_hasPrevCameraMotion)
+        {
+            double const deltaDx = curDx - m_prevDx;
+            double const deltaDy = curDy - m_prevDy;
+            double const deltaZoom = curZoom - m_prevZoom;
+            double const deltaRot = curRot - m_prevRot;
+            double const deltaCx = curCx - m_prevCx;
+            double const deltaCy = curCy - m_prevCy;
+
+            constexpr double maxDeltaPos = 0.12;
+            constexpr double maxDeltaZoom = 0.35;
+            constexpr double maxDeltaRot = 0.25;
+            constexpr double maxDeltaCenter = 0.20;
+
+            if (std::abs(deltaDx) > maxDeltaPos)
+            {
+                curDx = m_prevDx + std::copysign(maxDeltaPos, deltaDx) + (deltaDx - std::copysign(maxDeltaPos, deltaDx)) * 0.15;
+            }
+            if (std::abs(deltaDy) > maxDeltaPos)
+            {
+                curDy = m_prevDy + std::copysign(maxDeltaPos, deltaDy) + (deltaDy - std::copysign(maxDeltaPos, deltaDy)) * 0.15;
+            }
+            if (std::abs(deltaZoom) > maxDeltaZoom)
+            {
+                curZoom = m_prevZoom + std::copysign(maxDeltaZoom, deltaZoom) + (deltaZoom - std::copysign(maxDeltaZoom, deltaZoom)) * 0.15;
+            }
+            if (std::abs(deltaRot) > maxDeltaRot)
+            {
+                curRot = m_prevRot + std::copysign(maxDeltaRot, deltaRot) + (deltaRot - std::copysign(maxDeltaRot, deltaRot)) * 0.15;
+            }
+            if (std::abs(deltaCx) > maxDeltaCenter)
+            {
+                curCx = m_prevCx + std::copysign(maxDeltaCenter, deltaCx) + (deltaCx - std::copysign(maxDeltaCenter, deltaCx)) * 0.15;
+            }
+            if (std::abs(deltaCy) > maxDeltaCenter)
+            {
+                curCy = m_prevCy + std::copysign(maxDeltaCenter, deltaCy) + (deltaCy - std::copysign(maxDeltaCenter, deltaCy)) * 0.15;
+            }
+        }
+
+        m_prevDx = curDx;
+        m_prevDy = curDy;
+        m_prevZoom = curZoom;
+        m_prevRot = curRot;
+        m_prevCx = curCx;
+        m_prevCy = curCy;
+        m_hasPrevCameraMotion = true;
+
+        *m_perFrameContext.dx = static_cast<PRJM_EVAL_F>(curDx);
+        *m_perFrameContext.dy = static_cast<PRJM_EVAL_F>(curDy);
+        *m_perFrameContext.zoom = static_cast<PRJM_EVAL_F>(curZoom);
+        *m_perFrameContext.rot = static_cast<PRJM_EVAL_F>(curRot);
+        if (m_perFrameContext.cx) *m_perFrameContext.cx = static_cast<PRJM_EVAL_F>(curCx);
+        if (m_perFrameContext.cy) *m_perFrameContext.cy = static_cast<PRJM_EVAL_F>(curCy);
+    }
+
     m_perPixelContext.LoadPerFrameQVariables(m_state, m_perFrameContext);
 
     // Clamp gamma and echo zoom values
@@ -329,6 +403,8 @@ void MilkdropPreset::InitializePreset(PresetFileParser& parsedFile)
 
 void MilkdropPreset::CompileCodeAndRunInitExpressions()
 {
+    m_hasPrevCameraMotion = false;
+
     // Per-frame init and code
     m_perFrameContext.LoadStateVariables(m_state);
     m_perFrameContext.EvaluateInitCode(m_state);
