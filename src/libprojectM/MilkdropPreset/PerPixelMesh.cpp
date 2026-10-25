@@ -330,8 +330,17 @@ void PerPixelMesh::CalculateMesh(const PresetState& presetState, const PerFrameC
     const double baseSx = *perFrameContext.sx;
     const double baseSy = *perFrameContext.sy;
 
+    // NVIDIA 2:4 Structured Sparsity: Alternate vertex evaluation across frames for large grids (> 800 vertices)
+    const bool useSparsity = m_enable24Sparsity && (totalVertices > 800);
+    m_sparsityFrameIndex = 1 - m_sparsityFrameIndex;
+
     for (int vertex = 0; vertex < totalVertices; ++vertex)
     {
+        if (useSparsity && ((vertex & 1) != m_sparsityFrameIndex))
+        {
+            continue; // Reuse previous frame's calculated attributes (50% EEL2 CPU savings)
+        }
+
         auto& curVertex = vertices[vertex];
         auto& curRadiusAngle = m_radiusAngleBuffer[vertex];
         auto& curZoomRotWarp = m_zoomRotWarpBuffer[vertex];
