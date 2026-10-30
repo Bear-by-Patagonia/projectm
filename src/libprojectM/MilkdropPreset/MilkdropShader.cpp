@@ -787,7 +787,12 @@ void MilkdropShader::TranspileHLSLShader(const PresetState& presetState, std::st
         // texture fetches per pixel and bottleneck 2-TMU mobile/TV GPUs at 30 FPS.
         if (tapCount >= 1 && tapCount <= 2)
         {
-            const std::string bicubicFunc = R"(
+            std::string bicubicFunc = "";
+            if (glslResult.find("uniform vec4 _c7;") == std::string::npos && glslResult.find("_c7") == std::string::npos)
+            {
+                bicubicFunc += "uniform vec4 _c7;\n";
+            }
+            bicubicFunc += R"(
 vec4 sampleCatmullRom4Tap(sampler2D tex, vec2 uv) {
     vec2 ts = _c7.xy;
     vec2 its = _c7.zw;
