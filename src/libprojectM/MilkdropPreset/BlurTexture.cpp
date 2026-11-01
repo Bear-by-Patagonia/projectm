@@ -245,9 +245,11 @@ void BlurTexture::Update(const Renderer::Texture& sourceTexture, const PerFrameC
     Renderer::Mesh::Unbind();
     Renderer::BlendMode::Set(false, Renderer::BlendMode::Function::SourceAlpha, Renderer::BlendMode::Function::OneMinusSourceAlpha);
 
+#ifdef USE_GLES
     // Invalidate depth/stencil on blur scratch framebuffer before restoring original bindings
     const GLenum blurDiscards[] = { GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT };
     glInvalidateFramebuffer(GL_FRAMEBUFFER, 2, blurDiscards);
+#endif
 
     // Bind previous framebuffer and reset viewport size without glGetIntegerv GPU pipeline stalls
     glBindFramebuffer(GL_FRAMEBUFFER, currentFbo);

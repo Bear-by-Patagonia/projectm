@@ -114,9 +114,11 @@ void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audio
     m_flipTexture.Draw(*renderContext.shaderCache, m_framebuffer.GetColorAttachmentTexture(m_previousFrameBuffer, 0), nullptr, true, false);
     m_state.mainTexture = m_flipTexture.Texture();
 
+#ifdef USE_GLES
     // Invalidate depth/stencil attachments on current FBO before switching to prevent TBDR tile flushes to RAM
     const GLenum fboDiscards[] = { GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT };
     glInvalidateFramebuffer(GL_FRAMEBUFFER, 2, fboDiscards);
+#endif
 
     // We now draw to the current framebuffer.
     m_framebuffer.Bind(m_currentFrameBuffer);
@@ -182,14 +184,18 @@ void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audio
     m_framebuffer.BindRead(m_currentFrameBuffer);
     m_framebuffer.BindDraw(m_previousFrameBuffer);
 
+#ifdef USE_GLES
     // Invalidate stale depth/stencil content in destination framebuffer before drawing final composite
     const GLenum drawDiscards[] = { GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT };
     glInvalidateFramebuffer(GL_DRAW_FRAMEBUFFER, 2, drawDiscards);
+#endif
 
     m_finalComposite.Draw(m_state, m_perFrameContext);
 
+#ifdef USE_GLES
     // TBDR Tile-Memory Bandwidth Optimization: Invalidate read framebuffer attachments immediately
     glInvalidateFramebuffer(GL_READ_FRAMEBUFFER, 2, drawDiscards);
+#endif
 
     if (!m_finalComposite.HasCompositeShader())
     {
