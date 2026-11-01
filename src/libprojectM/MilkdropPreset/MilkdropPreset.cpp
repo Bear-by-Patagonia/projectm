@@ -102,26 +102,31 @@ void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audio
 
     glViewport(0, 0, renderContext.viewportSizeX, renderContext.viewportSizeY);
 
-    m_framebuffer.Bind(m_previousFrameBuffer);
     // Motion vector field. Drawn to the previous frame texture before warping it.
-    // Only do it after drawing one frame after init or resize when UV map was populated.
-    if (!m_isFirstFrame && mvActive && m_hasValidMotionVectorUVMap)
+    // Only bind m_previousFrameBuffer when motion vectors are actually active.
+    const bool hasMotionVectorsToDraw = (!m_isFirstFrame && mvActive && m_hasValidMotionVectorUVMap);
+    if (hasMotionVectorsToDraw)
     {
+        m_framebuffer.Bind(m_previousFrameBuffer);
         m_motionVectors.Draw(m_perFrameContext, m_motionVectorUVMap->Texture());
     }
 
-    // y-flip the previous frame and assign the flipped texture as "main"
-    m_flipTexture.Draw(*renderContext.shaderCache, m_framebuffer.GetColorAttachmentTexture(m_previousFrameBuffer, 0), nullptr, true, false);
-    m_state.mainTexture = m_flipTexture.Texture();
+    const bool blurRequired = (m_state.blurTexture.GetRequiredBlurLevel() != BlurTexture::BlurLevel::None);
+    if (m_isFirstFrame && blurRequired)
+    {
+        const auto initialPrevImage = m_framebuffer.GetColorAttachmentTexture(m_previousFrameBuffer, 0);
+        if (initialPrevImage)
+        {
+            m_state.blurTexture.Update(*initialPrevImage, m_perFrameContext, m_framebuffer.GetFramebufferID(m_currentFrameBuffer));
+        }
+    }
 
-#ifdef USE_GLES
-    // Invalidate depth/stencil attachments on current FBO before switching to prevent TBDR tile flushes to RAM
-    const GLenum fboDiscards[] = { GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT };
-    glInvalidateFramebuffer(GL_FRAMEBUFFER, 2, fboDiscards);
-#endif
+    // Zero-Flip UV scheme: sample previous frame FBO texture directly (main samplers invert v -> 1.0 - v in shader).
+    m_state.mainTexture = m_framebuffer.GetColorAttachmentTexture(m_previousFrameBuffer, 0);
 
     // We now draw to the current framebuffer.
     m_framebuffer.Bind(m_currentFrameBuffer);
+    glViewport(0, 0, renderContext.viewportSizeX, renderContext.viewportSizeY);
 
     // Only attach motion vector u/v texture (MRT GL_COLOR_ATTACHMENT1) when motion vectors are active.
     // Skipping MRT when mv_a == 0 saves ~3.7-8.3 MB/frame of RG16F tile write bandwidth.
@@ -129,6 +134,9 @@ void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audio
     {
         m_framebuffer.SetAttachment(m_currentFrameBuffer, 1, m_motionVectorUVMap);
     }
+
+    // TBDR optimization: discard stale color/depth/stencil tiles before opaque fullscreen warp blit.
+    Renderer::Framebuffer::InvalidateDrawAttachments(!m_perPixelMesh.WarpShaderUsesDiscard(), mvActive);
 
     // Draw previous frame image warped via per-pixel mesh and warp shader
     m_perPixelMesh.Draw(m_state, m_perFrameContext, m_perPixelContext);
@@ -144,21 +152,7 @@ void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audio
         m_hasValidMotionVectorUVMap = false;
     }
 
-    // Update blur textures only if active preset shader requires blur
-    if (m_state.blurTexture.GetRequiredBlurLevel() != BlurTexture::BlurLevel::None)
-    {
-        const auto warpedImage = m_framebuffer.GetColorAttachmentTexture(m_previousFrameBuffer, 0);
-        if (warpedImage)
-        {
-            m_state.blurTexture.Update(*warpedImage, m_perFrameContext, m_framebuffer.GetFramebufferID(m_currentFrameBuffer));
-        }
-
-        // Restore current framebuffer and viewport before rendering shapes & waveforms
-        m_framebuffer.Bind(m_currentFrameBuffer);
-        glViewport(0, 0, renderContext.viewportSizeX, renderContext.viewportSizeY);
-    }
-
-    // Draw audio-data-related stuff
+    // Draw audio-data-related overlays onto m_currentFrameBuffer without interrupting the TBDR render pass
     for (auto& shape : m_customShapes)
     {
         shape->Draw();
@@ -176,32 +170,33 @@ void MilkdropPreset::RenderFrame(const libprojectM::Audio::FrameAudioData& audio
     }
     m_border.Draw(m_perFrameContext);
 
-    // y-flip the image for final compositing again
-    m_flipTexture.Draw(*renderContext.shaderCache, m_framebuffer.GetColorAttachmentTexture(m_currentFrameBuffer, 0), nullptr, true, false);
-    m_state.mainTexture = m_flipTexture.Texture();
+    // Update blur textures after m_currentFrameBuffer completes (exact MilkDrop 2 post-sprite order:
+    // eliminates mid-pass TBDR flush/reload and removes 1-frame Sobel normal lag in FinalComposite).
+    if (blurRequired)
+    {
+        const auto currentImage = m_framebuffer.GetColorAttachmentTexture(m_currentFrameBuffer, 0);
+        if (currentImage)
+        {
+            m_state.blurTexture.Update(*currentImage, m_perFrameContext, m_framebuffer.GetFramebufferID(m_previousFrameBuffer));
+        }
+    }
+
+    // Zero-Flip UV scheme: bind current frame FBO texture directly as main for FinalComposite.
+    m_state.mainTexture = m_framebuffer.GetColorAttachmentTexture(m_currentFrameBuffer, 0);
 
     // We no longer need the previous frame image, use it to render the final composite.
     m_framebuffer.BindRead(m_currentFrameBuffer);
     m_framebuffer.BindDraw(m_previousFrameBuffer);
+    glViewport(0, 0, renderContext.viewportSizeX, renderContext.viewportSizeY);
 
-#ifdef USE_GLES
-    // Invalidate stale depth/stencil content in destination framebuffer before drawing final composite
-    const GLenum drawDiscards[] = { GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT };
-    glInvalidateFramebuffer(GL_DRAW_FRAMEBUFFER, 2, drawDiscards);
-#endif
+    Renderer::Framebuffer::InvalidateDrawAttachments(!m_finalComposite.CompositeShaderUsesDiscard(), false);
 
     m_finalComposite.Draw(m_state, m_perFrameContext);
 
 #ifdef USE_GLES
-    // TBDR Tile-Memory Bandwidth Optimization: Invalidate read framebuffer attachments immediately
-    glInvalidateFramebuffer(GL_READ_FRAMEBUFFER, 2, drawDiscards);
+    const GLenum readDiscards[] = { GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT };
+    glInvalidateFramebuffer(GL_READ_FRAMEBUFFER, 2, readDiscards);
 #endif
-
-    if (!m_finalComposite.HasCompositeShader())
-    {
-        // Flip texture again in "previous" framebuffer as old-school effects are still upside down.
-        m_flipTexture.Draw(*renderContext.shaderCache, m_framebuffer.GetColorAttachmentTexture(m_previousFrameBuffer, 0), m_framebuffer, m_previousFrameBuffer, true, false);
-    }
 
     // Swap framebuffer IDs for the next frame.
     std::swap(m_currentFrameBuffer, m_previousFrameBuffer);
@@ -219,8 +214,30 @@ void MilkdropPreset::DrawInitialImage(const std::shared_ptr<Renderer::Texture>& 
 {
     m_framebuffer.SetSize(renderContext.viewportSizeX, renderContext.viewportSizeY);
 
-    // Render to previous framebuffer, as this is the image used to draw the next frame on.
-    m_flipTexture.Draw(*renderContext.shaderCache, image, m_framebuffer, m_previousFrameBuffer);
+    if (!image || image->Empty() || m_framebuffer.Width() <= 0 || m_framebuffer.Height() <= 0)
+    {
+        return;
+    }
+
+    // Blit directly into m_previousFrameBuffer without allocating an 8.3 MB persistent flip texture.
+    GLuint readFbo = 0;
+    glGenFramebuffers(1, &readFbo);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, readFbo);
+    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, image->TextureID(), 0);
+
+    m_framebuffer.BindDraw(m_previousFrameBuffer);
+    Renderer::Framebuffer::InvalidateDrawAttachments(true, false);
+
+    GLenum const filter = (image->Width() == m_framebuffer.Width() && image->Height() == m_framebuffer.Height())
+                              ? GL_NEAREST
+                              : GL_LINEAR;
+    glBlitFramebuffer(0, 0, image->Width(), image->Height(),
+                      0, 0, m_framebuffer.Width(), m_framebuffer.Height(),
+                      GL_COLOR_BUFFER_BIT, filter);
+
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glDeleteFramebuffers(1, &readFbo);
 }
 
 void MilkdropPreset::BindFramebuffer()

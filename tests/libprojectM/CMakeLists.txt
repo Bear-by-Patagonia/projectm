@@ -32,6 +32,7 @@ add_executable(projectM-unittest
         MilkdropShaderCommentParsingTest.cpp
         PresetFileParserTest.cpp
         WaveformAlignerTest.cpp
+        ZeroFlipOrientationTest.cpp
 
         $<TARGET_OBJECTS:Audio>
         $<TARGET_OBJECTS:MilkdropPreset>
@@ -53,6 +54,7 @@ target_include_directories(projectM-unittest
         "${PROJECTM_SOURCE_DIR}/src/libprojectM"
         "${PROJECTM_SOURCE_DIR}"
         "${PROJECTM_SOURCE_DIR}/vendor/hlslparser/src"
+        "${CMAKE_BINARY_DIR}/src/libprojectM/MilkdropPreset"
         )
 
 target_link_libraries(projectM-unittest

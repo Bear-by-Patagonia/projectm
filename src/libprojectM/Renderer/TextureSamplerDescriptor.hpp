@@ -88,6 +88,12 @@ public:
     auto Sampler() const -> std::shared_ptr<class Sampler>;
 
     /**
+     * @brief Returns the sampler name without the "sampler_" prefix.
+     * @return The sampler identifier suffix.
+     */
+    auto SamplerName() const -> const std::string&;
+
+    /**
      * @brief Returns the shader sampler HLSL declaration.
      * @return The sampler declaration for use in the preset HLSL shaders.
      */

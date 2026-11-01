@@ -51,6 +51,11 @@ public:
               const PerFrameContext& perFrameContext,
               PerPixelContext& perPixelContext);
 
+    /**
+     * @brief Returns true if the active custom warp shader executes a discard instruction.
+     */
+    auto WarpShaderUsesDiscard() const -> bool;
+
 
 private:
     /**

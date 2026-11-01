@@ -76,6 +76,11 @@ auto TextureSamplerDescriptor::Sampler() const -> std::shared_ptr<class Sampler>
     return m_sampler;
 }
 
+auto TextureSamplerDescriptor::SamplerName() const -> const std::string&
+{
+    return m_samplerName;
+}
+
 auto TextureSamplerDescriptor::SamplerDeclaration() const -> std::string
 {
     if (!m_texture || !m_sampler)

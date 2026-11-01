@@ -9,7 +9,7 @@ namespace libprojectM {
 namespace Renderer {
 
 Shader::Shader()
-    : m_shaderProgram(glCreateProgram())
+    : m_shaderProgram(0)
 {
 }
 
@@ -24,6 +24,10 @@ Shader::~Shader()
 void Shader::CompileProgram(const std::string& vertexShaderSource,
                             const std::string& fragmentShaderSource)
 {
+    if (m_shaderProgram == 0)
+    {
+        m_shaderProgram = glCreateProgram();
+    }
     auto vertexShader = CompileShader(vertexShaderSource, GL_VERTEX_SHADER);
     GLuint fragmentShader = 0;
     try

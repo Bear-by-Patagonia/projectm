@@ -107,7 +107,26 @@ public:
      */
     static bool IsCatmullRomEnabled();
 
+    /**
+     * @brief Returns true if the transpiled GLSL fragment shader executes a discard instruction.
+     */
+    auto UsesDiscard() const -> bool;
+
+    /**
+     * @brief Pure CPU HLSL-to-GLSL transpilation entry point for unit testing without an OpenGL context.
+     * @param presetShaderCode Raw MilkDrop HLSL shader source containing shader_body.
+     * @return Generated GLSL fragment shader source string.
+     */
+    auto TranspileToGLSLSource(const std::string& presetShaderCode) -> std::string;
+
 private:
+    /**
+     * @brief Translates preprocessed HLSL shader code into GLSL source without invoking OpenGL compilation.
+     */
+    auto GenerateGLSLSource(const std::set<std::string>& samplerDeclarations,
+                            const std::set<std::string>& texSizeDeclarations,
+                            const std::vector<std::string>& mainSamplerNames,
+                            std::string program) const -> std::string;
     /**
      * @brief Prepares the shader code to be translated into GLSL.
      * @param program The program code to work on.
@@ -165,6 +184,7 @@ private:
     bool m_has3DRotationUniforms{false};
     bool m_hasFastTrigUniforms{false}; // _c8, _c9
     bool m_hasSlowTrigUniforms{false}; // _c10, _c11
+    bool m_usesDiscard{false};
 };
 
 } // namespace MilkdropPreset

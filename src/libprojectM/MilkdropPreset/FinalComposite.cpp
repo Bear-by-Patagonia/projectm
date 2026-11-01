@@ -169,6 +169,11 @@ auto FinalComposite::HasCompositeShader() const -> bool
     return m_compositeShader != nullptr;
 }
 
+auto FinalComposite::CompositeShaderUsesDiscard() const -> bool
+{
+    return m_compositeShader && m_compositeShader->UsesDiscard();
+}
+
 void FinalComposite::InitializeMesh(const PresetState& presetState)
 {
     if (m_viewportWidth == presetState.renderContext.viewportSizeX &&

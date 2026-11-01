@@ -234,6 +234,7 @@ void BlurTexture::Update(const Renderer::Texture& sourceTexture, const PerFrameC
 
         // Attach destination blur texture directly to FBO (zero-copy direct render-to-texture)
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_blurTextures[pass]->TextureID(), 0);
+        Renderer::Framebuffer::InvalidateDrawAttachments(true, false);
 
         // Draw fullscreen quad directly into target texture
         m_blurMesh.Draw();

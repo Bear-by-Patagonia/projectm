@@ -88,6 +88,28 @@ void Framebuffer::Unbind()
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 }
 
+void Framebuffer::InvalidateDrawAttachments(bool invalidateColor0, bool invalidateColor1)
+{
+#ifdef USE_GLES
+    GLenum attachments[4];
+    GLsizei count = 0;
+    if (invalidateColor0)
+    {
+        attachments[count++] = GL_COLOR_ATTACHMENT0;
+    }
+    if (invalidateColor1)
+    {
+        attachments[count++] = GL_COLOR_ATTACHMENT1;
+    }
+    attachments[count++] = GL_DEPTH_ATTACHMENT;
+    attachments[count++] = GL_STENCIL_ATTACHMENT;
+    glInvalidateFramebuffer(GL_DRAW_FRAMEBUFFER, count, attachments);
+#else
+    (void)invalidateColor0;
+    (void)invalidateColor1;
+#endif
+}
+
 bool Framebuffer::SetSize(int width, int height)
 {
     if (width == 0 || height == 0 ||

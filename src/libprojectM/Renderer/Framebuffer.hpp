@@ -82,6 +82,12 @@ public:
     static void Unbind();
 
     /**
+     * @brief Invalidates attachments on GL_DRAW_FRAMEBUFFER prior to an opaque fullscreen pass
+     * so TBDR GPUs skip loading stale color/depth/stencil tiles from external DRAM into tile SRAM.
+     */
+    static void InvalidateDrawAttachments(bool invalidateColor0, bool invalidateColor1 = false);
+
+    /**
      * @brief Sets the framebuffer texture size.
      *
      * This will bind the framebuffers and reallocate all attachment textures, creating new

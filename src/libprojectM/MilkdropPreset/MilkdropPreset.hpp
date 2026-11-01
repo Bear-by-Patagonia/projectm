@@ -35,7 +35,6 @@
 #include "Preset.hpp"
 #include "Waveform.hpp"
 
-#include <Renderer/CopyTexture.hpp>
 #include <Renderer/Framebuffer.hpp>
 
 #include <memory>
@@ -126,7 +125,6 @@ private:
     std::array<std::unique_ptr<CustomShape>, CustomShapeCount> m_customShapes;          //!< Custom shapes in this preset.
     DarkenCenter m_darkenCenter;                                                        //!< Center darkening effect.
     Border m_border;                                                                    //!< Inner/outer borders.
-    Renderer::CopyTexture m_flipTexture;                                                //!< Texture flip filter
 
     FinalComposite m_finalComposite; //!< Final composite shader or filters.
 

@@ -115,6 +115,11 @@ void PerPixelMesh::Draw(const PresetState& presetState,
     WarpedBlit(presetState, perFrameContext);
 }
 
+auto PerPixelMesh::WarpShaderUsesDiscard() const -> bool
+{
+    return m_warpShader && m_warpShader->UsesDiscard();
+}
+
 void PerPixelMesh::InitializeMesh(const PresetState& presetState)
 {
     const bool modernMode = MilkdropShader::IsCurlNoiseEnabled();
@@ -475,6 +480,7 @@ void PerPixelMesh::WarpedBlit(const PresetState& presetState,
     }
     m_perPixelSampler.Bind(0);
 
+    Renderer::BlendMode::SetBlendActive(false);
     m_warpMesh.Draw();
 
     Renderer::Mesh::Unbind();

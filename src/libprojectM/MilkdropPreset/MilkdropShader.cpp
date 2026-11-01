@@ -66,6 +66,59 @@ bool MilkdropShader::IsCatmullRomEnabled()
     return s_catmullRomEnabled;
 }
 
+auto MilkdropShader::UsesDiscard() const -> bool
+{
+    return m_usesDiscard;
+}
+
+auto MilkdropShader::TranspileToGLSLSource(const std::string& presetShaderCode) -> std::string
+{
+    LoadCode(presetShaderCode);
+
+    std::set<std::string> samplerDeclarations;
+    std::set<std::string> texSizeDeclarations;
+    std::vector<std::string> mainSamplerNames;
+
+    for (const auto& name : m_samplerNames)
+    {
+        std::string baseName = name;
+        if (name.length() > 3 && name.at(2) == '_')
+        {
+            baseName = name.substr(3);
+        }
+        std::string const lowerBase = Utils::ToLower(baseName);
+        if (lowerBase == "main")
+        {
+            std::string effectiveName = name;
+            if (name == "FC_main" || name == "PC_main" || name == "FW_main" || name == "PW_main")
+            {
+                effectiveName = Utils::ToLower(name);
+            }
+            samplerDeclarations.insert("uniform sampler2D sampler_" + effectiveName + ";\n");
+            texSizeDeclarations.insert("uniform float4 texsize_main;\n");
+            mainSamplerNames.push_back("sampler_" + effectiveName);
+        }
+        else if (lowerBase == "blur1" || lowerBase == "blur2" || lowerBase == "blur3")
+        {
+            samplerDeclarations.insert("uniform sampler2D sampler_" + lowerBase + ";\n");
+        }
+        else if (lowerBase.find("noisevol") != std::string::npos)
+        {
+            samplerDeclarations.insert("uniform sampler3D sampler_" + name + ";\n");
+            texSizeDeclarations.insert("uniform float4 texsize_" + baseName + ";\n");
+        }
+        else
+        {
+            samplerDeclarations.insert("uniform sampler2D sampler_" + name + ";\n");
+            texSizeDeclarations.insert("uniform float4 texsize_" + baseName + ";\n");
+        }
+    }
+
+    std::string glslResult = GenerateGLSLSource(samplerDeclarations, texSizeDeclarations, mainSamplerNames, m_preprocessedCode);
+    m_usesDiscard = (glslResult.find("discard") != std::string::npos);
+    return glslResult;
+}
+
 static auto floatRand = []() { return static_cast<float>(rand() % 7381) / 7380.0f; };
 
 MilkdropShader::MilkdropShader(ShaderType type)
@@ -139,9 +192,14 @@ void MilkdropShader::LoadTexturesAndCompile(PresetState& presetState)
         // The "main" and "blurX" textures are preset-specific and are not managed by TextureManager.
         if (lowerCaseName == "main")
         {
+            std::string effectiveName = name;
+            if (name == "FC_main" || name == "PC_main" || name == "FW_main" || name == "PW_main")
+            {
+                effectiveName = Utils::ToLower(name);
+            }
             Renderer::TextureSamplerDescriptor desc(presetState.mainTexture.lock(),
-                                                    presetState.renderContext.textureManager->GetSampler(name),
-                                                    name,
+                                                    presetState.renderContext.textureManager->GetSampler(effectiveName),
+                                                    effectiveName,
                                                     "main");
             m_mainTextureDescriptors.push_back(std::move(desc));
             continue;
@@ -658,7 +716,10 @@ void MilkdropShader::GetReferencedSamplers(const std::string& program)
     }
 }
 
-void MilkdropShader::TranspileHLSLShader(const PresetState& presetState, std::string& program)
+auto MilkdropShader::GenerateGLSLSource(const std::set<std::string>& samplerDeclarations,
+                                        const std::set<std::string>& texSizeDeclarations,
+                                        const std::vector<std::string>& mainSamplerNames,
+                                        std::string program) const -> std::string
 {
     std::string shaderTypeString = "composite";
     if (m_type == ShaderType::WarpShader)
@@ -699,25 +760,6 @@ void MilkdropShader::TranspileHLSLShader(const PresetState& presetState, std::st
     while (std::regex_search(sourcePreprocessed, matches, std::regex("float4\\s+texsize_.*")))
     {
         sourcePreprocessed.replace(matches.position(), matches.length(), "");
-    }
-
-    // Collect unique samplers and texsize uniforms
-    std::set<std::string> samplerDeclarations;
-    std::set<std::string> texSizeDeclarations;
-    for (const auto& desc : m_mainTextureDescriptors)
-    {
-        samplerDeclarations.insert(desc.SamplerDeclaration());
-        texSizeDeclarations.insert(desc.TexSizeDeclaration());
-    }
-    for (const auto& desc : presetState.blurTexture.GetDescriptorsForBlurLevel(m_maxBlurLevelRequired))
-    {
-        samplerDeclarations.insert(desc.SamplerDeclaration());
-        // No texsize_blur1 etc.
-    }
-    for (const auto& desc : m_textureSamplerDescriptors)
-    {
-        samplerDeclarations.insert(desc.SamplerDeclaration());
-        texSizeDeclarations.insert(desc.TexSizeDeclaration());
     }
 
     // Now insert them on top.
@@ -770,29 +812,80 @@ void MilkdropShader::TranspileHLSLShader(const PresetState& presetState, std::st
         LOG_INFO("[MilkdropShader] Dynamic FP16 (mediump) precision engaged for " + shaderTypeString + " shader");
     }
 
+    std::set<std::string> const uniqueMainSamplers(mainSamplerNames.begin(), mainSamplerNames.end());
+
+    auto replaceAllOccurrences = [](std::string& text, const std::string& from, const std::string& to) -> size_t {
+        size_t count = 0;
+        size_t pos = 0;
+        while ((pos = text.find(from, pos)) != std::string::npos)
+        {
+            text.replace(pos, from.length(), to);
+            pos += to.length();
+            ++count;
+        }
+        return count;
+    };
+
+    // GLSLGenerator::ChooseUniqueName appends a numeric suffix (e.g. tex2Dlod0, tex2Dbias0, tex2Dgrad0).
+    auto replaceIntrinsicCall = [](std::string& text, const std::string& baseFunc, const std::string& samplerArg, const std::string& replacementFunc) -> size_t {
+        size_t count = 0;
+        size_t pos = 0;
+        const std::string argSuffix = "(" + samplerArg + ",";
+        while ((pos = text.find(baseFunc, pos)) != std::string::npos)
+        {
+            // Ensure word boundary before baseFunc
+            if (pos > 0 && (std::isalnum(static_cast<unsigned char>(text[pos - 1])) || text[pos - 1] == '_'))
+            {
+                pos += baseFunc.length();
+                continue;
+            }
+            size_t digitEnd = pos + baseFunc.length();
+            while (digitEnd < text.length() && std::isdigit(static_cast<unsigned char>(text[digitEnd])))
+            {
+                ++digitEnd;
+            }
+            if (text.compare(digitEnd, argSuffix.length(), argSuffix) == 0)
+            {
+                const std::string fullTo = replacementFunc + "(";
+                const size_t fullLen = (digitEnd - pos) + argSuffix.length();
+                text.replace(pos, fullLen, fullTo);
+                pos += fullTo.length();
+                ++count;
+            }
+            else
+            {
+                pos = digitEnd;
+            }
+        }
+        return count;
+    };
+
+    // Determine whether 1..2 tap Catmull-Rom 4-tap bicubic advection applies to sampler_main in WarpShader.
+    size_t mainTapCount = 0;
     if (s_catmullRomEnabled && m_type == ShaderType::WarpShader)
     {
         const std::string target = "texture(sampler_main,";
-        size_t tapCount = 0;
         size_t scanPos = 0;
         while ((scanPos = glslResult.find(target, scanPos)) != std::string::npos)
         {
-            tapCount++;
+            ++mainTapCount;
             scanPos += target.length();
         }
+    }
+    const bool injectBicubicMain = (s_catmullRomEnabled && m_type == ShaderType::WarpShader && mainTapCount >= 1 && mainTapCount <= 2);
 
-        // Only inject 4-tap Catmull-Rom bicubic interpolation when the warp shader performs
-        // 1 or 2 advection lookups. Presets that already perform 3..9 neighbor lookups for
-        // finite-difference gradients / reaction-diffusion Laplacians would explode to 16..36
-        // texture fetches per pixel and bottleneck 2-TMU mobile/TV GPUs at 30 FPS.
-        if (tapCount >= 1 && tapCount <= 2)
+    // Zero-Flip UV Coordinate Scheme:
+    // Both m_previousFrameBuffer and m_currentFrameBuffer are stored right-side up in OpenGL FBO orientation (O_GL).
+    // Replacing main-texture lookups sample(S, uv) with sample(S, vec2(uv.x, 1.0 - uv.y)) satisfies the exact
+    // texel-center identity with CopyTexture(..., flipVertical=true) while eliminating 2..3 fullscreen FBO copies per frame.
+    std::string zeroFlipHelpers;
+    if (injectBicubicMain)
+    {
+        if (glslResult.find("uniform vec4 _c7;") == std::string::npos && glslResult.find("_c7") == std::string::npos)
         {
-            std::string bicubicFunc = "";
-            if (glslResult.find("uniform vec4 _c7;") == std::string::npos && glslResult.find("_c7") == std::string::npos)
-            {
-                bicubicFunc += "uniform vec4 _c7;\n";
-            }
-            bicubicFunc += R"(
+            zeroFlipHelpers += "uniform vec4 _c7;\n";
+        }
+        zeroFlipHelpers += R"(
 vec4 sampleCatmullRom4Tap(sampler2D tex, vec2 uv) {
     vec2 ts = _c7.xy;
     vec2 its = _c7.zw;
@@ -817,26 +910,118 @@ vec4 sampleCatmullRom4Tap(sampler2D tex, vec2 uv) {
             texture(tex, vec2(t1.x, t1.y)) * (s1.x * s1.y));
 }
 )";
-            size_t mainPos = glslResult.find("void main()");
-            if (mainPos != std::string::npos)
+        LOG_INFO("[MilkdropShader] Catmull-Rom 4-Tap bicubic advection injected for warp shader");
+    }
+
+    for (const auto& samp : uniqueMainSamplers)
+    {
+        if (glslResult.find("uniform sampler2D " + samp + ";") == std::string::npos)
+        {
+            continue;
+        }
+
+        const size_t texReplaced = replaceAllOccurrences(glslResult, "texture(" + samp + ",", "_pm_texMain_" + samp + "(");
+        const size_t lodReplaced = replaceIntrinsicCall(glslResult, "tex2Dlod", samp, "_pm_texMainLod_" + samp);
+        const size_t biasReplaced = replaceIntrinsicCall(glslResult, "tex2Dbias", samp, "_pm_texMainBias_" + samp);
+        const size_t gradReplaced = replaceIntrinsicCall(glslResult, "tex2Dgrad", samp, "_pm_texMainGrad_" + samp);
+        const size_t projReplaced = replaceAllOccurrences(glslResult, "textureProj(" + samp + ",", "_pm_texMainProj_" + samp + "(");
+
+        if (texReplaced > 0)
+        {
+            if (injectBicubicMain && samp == "sampler_main")
             {
-                glslResult.insert(mainPos, bicubicFunc);
-                const std::string replacement = "sampleCatmullRom4Tap(sampler_main,";
-                size_t pos = 0;
-                while ((pos = glslResult.find(target, pos)) != std::string::npos)
-                {
-                    glslResult.replace(pos, target.length(), replacement);
-                    pos += replacement.length();
-                }
-                LOG_INFO("[MilkdropShader] Catmull-Rom 4-Tap bicubic advection injected for warp shader");
+                zeroFlipHelpers += "vec4 _pm_texMain_" + samp + "(vec2 _u) { return sampleCatmullRom4Tap(" + samp + ", vec2(_u.x, 1.0 - _u.y)); }\n";
             }
+            else
+            {
+                zeroFlipHelpers += "vec4 _pm_texMain_" + samp + "(vec2 _u) { return texture(" + samp + ", vec2(_u.x, 1.0 - _u.y)); }\n";
+            }
+            zeroFlipHelpers += "vec4 _pm_texMain_" + samp + "(vec2 _u, float _b) { return texture(" + samp + ", vec2(_u.x, 1.0 - _u.y), _b); }\n";
+        }
+        if (lodReplaced > 0)
+        {
+            zeroFlipHelpers += "vec4 _pm_texMainLod_" + samp + "(vec4 _t) { return textureLod(" + samp + ", vec2(_t.x, 1.0 - _t.y), _t.w); }\n";
+            zeroFlipHelpers += "vec4 _pm_texMainLod_" + samp + "(vec3 _t) { return textureLod(" + samp + ", vec2(_t.x, 1.0 - _t.y), _t.z); }\n";
+            zeroFlipHelpers += "vec4 _pm_texMainLod_" + samp + "(vec2 _t, float _l) { return textureLod(" + samp + ", vec2(_t.x, 1.0 - _t.y), _l); }\n";
+        }
+        if (biasReplaced > 0)
+        {
+            zeroFlipHelpers += "vec4 _pm_texMainBias_" + samp + "(vec4 _t) { return texture(" + samp + ", vec2(_t.x, 1.0 - _t.y), _t.w); }\n";
+        }
+        if (gradReplaced > 0)
+        {
+            zeroFlipHelpers += "vec4 _pm_texMainGrad_" + samp + "(vec2 _t, vec2 _dx, vec2 _dy) { return textureGrad(" + samp + ", vec2(_t.x, 1.0 - _t.y), vec2(_dx.x, -_dx.y), vec2(_dy.x, -_dy.y)); }\n";
+        }
+        if (projReplaced > 0)
+        {
+            zeroFlipHelpers += "vec4 _pm_texMainProj_" + samp + "(vec3 _p) { return textureProj(" + samp + ", vec3(_p.x, _p.z - _p.y, _p.z)); }\n";
+            zeroFlipHelpers += "vec4 _pm_texMainProj_" + samp + "(vec4 _p) { return textureProj(" + samp + ", vec4(_p.x, _p.w - _p.y, _p.z, _p.w)); }\n";
+        }
+    }
+
+    if (!zeroFlipHelpers.empty())
+    {
+        // Insert right after the last global uniform declaration so any user helper functions
+        // declared before PS() as well as PS() and main() have full visibility of the wrappers.
+        size_t insertPos = std::string::npos;
+        size_t searchPos = 0;
+        while ((searchPos = glslResult.find("\nuniform ", searchPos)) != std::string::npos)
+        {
+            size_t const lineEnd = glslResult.find('\n', searchPos + 1);
+            if (lineEnd != std::string::npos)
+            {
+                insertPos = lineEnd + 1;
+                searchPos = lineEnd;
+            }
+            else
+            {
+                break;
+            }
+        }
+        if (insertPos == std::string::npos)
+        {
+            insertPos = glslResult.find("void PS(");
+        }
+        if (insertPos == std::string::npos)
+        {
+            insertPos = glslResult.find("void main()");
+        }
+        if (insertPos != std::string::npos)
+        {
+            glslResult.insert(insertPos, zeroFlipHelpers);
         }
     }
 
     LOG_TRACE("[MilkdropShader] Transpiled GLSL " + shaderTypeString + " shader code:\n" + glslResult);
+    return glslResult;
+}
 
-    // Now we have GLSL source for the preset shader program (hopefully it's valid!)
-    // Compile the preset shader fragment shader with the standard vertex shader and cross our fingers.
+void MilkdropShader::TranspileHLSLShader(const PresetState& presetState, std::string& program)
+{
+    // Collect unique samplers and texsize uniforms
+    std::set<std::string> samplerDeclarations;
+    std::set<std::string> texSizeDeclarations;
+    std::vector<std::string> mainSamplerNames;
+    for (const auto& desc : m_mainTextureDescriptors)
+    {
+        samplerDeclarations.insert(desc.SamplerDeclaration());
+        texSizeDeclarations.insert(desc.TexSizeDeclaration());
+        mainSamplerNames.push_back("sampler_" + desc.SamplerName());
+    }
+    for (const auto& desc : presetState.blurTexture.GetDescriptorsForBlurLevel(m_maxBlurLevelRequired))
+    {
+        samplerDeclarations.insert(desc.SamplerDeclaration());
+    }
+    for (const auto& desc : m_textureSamplerDescriptors)
+    {
+        samplerDeclarations.insert(desc.SamplerDeclaration());
+        texSizeDeclarations.insert(desc.TexSizeDeclaration());
+    }
+
+    std::string glslResult = GenerateGLSLSource(samplerDeclarations, texSizeDeclarations, mainSamplerNames, program);
+    m_usesDiscard = (glslResult.find("discard") != std::string::npos);
+
+    // Compile the preset shader fragment shader with the standard vertex shader.
     if (m_type == ShaderType::WarpShader)
     {
         m_shader.CompileProgram(MilkdropStaticShaders::Get()->GetPresetWarpVertexShader(), glslResult.c_str());

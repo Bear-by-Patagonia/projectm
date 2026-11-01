@@ -43,6 +43,11 @@ public:
      */
     auto HasCompositeShader() const -> bool;
 
+    /**
+     * @brief Returns true if the active composite shader executes a discard instruction.
+     */
+    auto CompositeShaderUsesDiscard() const -> bool;
+
 private:
     /**
      * Composite mesh vertex with all required attributes.

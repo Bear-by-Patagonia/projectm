@@ -28,8 +28,8 @@ vec4 sampleCatmullRom4Tap(sampler2D tex, vec2 uv) {
     vec2 s0 = w0 + w1;
     vec2 s1 = w2 + w3;
 
-    vec2 f0 = w1 / s0;
-    vec2 f1 = w3 / s1;
+    vec2 f0 = w1 / max(s0, vec2(1e-5));
+    vec2 f1 = w3 / max(s1, vec2(1e-5));
 
     vec2 t0 = (tc - 1.0 + f0) * invTexSize;
     vec2 t1 = (tc + 1.0 + f1) * invTexSize;
@@ -41,11 +41,12 @@ vec4 sampleCatmullRom4Tap(sampler2D tex, vec2 uv) {
 }
 
 void main() {
+    vec2 mainUv = vec2(frag_TEXCOORD0.x, 1.0 - frag_TEXCOORD0.y);
     vec4 texColor;
     if (u_catmullRom != 0) {
-        texColor = sampleCatmullRom4Tap(texture_sampler, frag_TEXCOORD0.xy);
+        texColor = sampleCatmullRom4Tap(texture_sampler, mainUv);
     } else {
-        texColor = texture(texture_sampler, frag_TEXCOORD0.xy);
+        texColor = texture(texture_sampler, mainUv);
     }
     color = frag_COLOR * texColor;
     texCoords = frag_TEXCOORD0.xy;
