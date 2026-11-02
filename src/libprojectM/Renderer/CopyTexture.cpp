@@ -162,6 +162,16 @@ vec3 linearToSRGB(vec3 c) {
     return pow(max(c, vec3(0.0)), vec3(1.0 / 2.2));
 }
 
+// Narkowicz ACES Fitted Film-Grade Tonemapping (Optimized for Mobile/TV GPUs)
+vec3 ACESFilm(vec3 x) {
+    float a = 2.51;
+    float b = 0.03;
+    float c = 2.43;
+    float d = 0.59;
+    float e = 0.14;
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
 // Fast 5-tap Catmull-Rom Bicubic Super-Resolution Reconstruction Filter
 // Reconstructs subpixel high-frequency details during Dynamic Resolution Scaling (DRS) upscaling
 vec4 sampleCatmullRom(sampler2D tex, vec2 uv, vec2 texSize) {
@@ -236,6 +246,21 @@ void main() {
         }
 
         finalLinear = clamp(finalLinear, 0.0, 1.0);
+
+        if (u_enable_low_tier_clarity == 1) {
+            // 1. Film-grade ACES Tonemapping: Prevents highlight bleaching and preserves rich rolloff
+            finalLinear = ACESFilm(finalLinear * 1.08);
+
+            // 2. Luma-Weighted Vibrance: Enhances color saturation in midtones without crushing shadows or blowing highlights
+            float lumMid = dot(finalLinear, vec3(0.2126, 0.7152, 0.0722));
+            float vibranceFactor = 1.0 + 0.22 * sin(clamp(lumMid, 0.0, 1.0) * 3.14159265);
+            finalLinear = clamp(mix(vec3(lumMid), finalLinear, vibranceFactor), 0.0, 1.0);
+
+            // 3. Faux-HDR Specular Bloom Kick: Emulates 1000-nit OLED / Mini-LED micro-contrast on 8-bit pipeline
+            float specKick = max(0.0, lumMid - 0.70);
+            finalLinear = clamp(finalLinear + finalLinear * (specKick * specKick * 1.8), 0.0, 1.0);
+        }
+
         outColor = linearToSRGB(finalLinear);
 
         // Unified 0-Nit True Black Hermite Gate:
@@ -255,11 +280,15 @@ void main() {
     }
 
     if (u_enable_low_tier_clarity == 1) {
-        // Fast temporal hash dither to eliminate 8-bit color banding on budget TV panels
-        float dither = (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) * (1.0 / 255.0);
+        // 4. Triangular Probability Density Function (TPDF) Dithering:
+        // Generates completely liquid, imperceptible 10-bit transitions on OLED / Mini-LED panels
+        vec2 p = gl_FragCoord.xy;
+        float r1 = fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+        float r2 = fract(sin(dot(p + vec2(1.23, 4.56), vec2(39.346, 11.135))) * 23421.631);
+        float tpdfDither = (r1 + r2 - 1.0) * (1.0 / 255.0);
         float lum = dot(outColor, vec3(0.2126, 0.7152, 0.0722));
         float blackMask = smoothstep(0.0001, 0.0010, lum);
-        outColor = clamp(outColor + dither * blackMask, 0.0, 1.0);
+        outColor = clamp(outColor + tpdfDither * blackMask, 0.0, 1.0);
     }
 
     color = vec4(clamp(outColor, 0.0, 1.0), 1.0);
