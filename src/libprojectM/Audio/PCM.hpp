@@ -135,7 +135,8 @@ private:
 
     // Alignment data
     WaveformAligner m_alignL; //!< Left-channel waveform alignment.
-    WaveformAligner m_alignR; //!< Left-channel waveform alignment.
+    WaveformAligner m_alignR; //!< Right-channel waveform alignment.
+    bool m_wasMono{false};    //!< Tracks mono/dual-mono state to avoid duplicate R-channel FFT and alignment.
 
     // Frame beat detection values
     Loudness m_bass{Loudness::Band::Bass};       //!< Beat detection/volume for the "bass" band.

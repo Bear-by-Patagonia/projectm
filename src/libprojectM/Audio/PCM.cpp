@@ -1,5 +1,6 @@
 #include "Audio/PCM.hpp"
 
+#include <algorithm>
 #include <mutex>
 
 namespace libprojectM {
@@ -104,13 +105,28 @@ void PCM::ProcessAudioData(double secondsSinceLastFrame, uint32_t frame)
         CopyNewWaveformData(m_inputBufferR, m_waveformR);
     }
 
-    // 2. Update spectrum analyzer data for both channels (zero-allocation FFT)
-    UpdateSpectrum(m_waveformL, m_spectrumL);
-    UpdateSpectrum(m_waveformR, m_spectrumR);
+    // 2. Deduplicate mono / dual-mono / silent buffers (halves FFT & WaveformAligner CPU cost)
+    bool const channelsIdentical = std::equal(m_waveformL.begin(), m_waveformL.end(), m_waveformR.begin());
 
-    // 3. Align waveforms
+    UpdateSpectrum(m_waveformL, m_spectrumL);
     m_alignL.Align(m_waveformL);
-    m_alignR.Align(m_waveformR);
+
+    if (channelsIdentical)
+    {
+        m_spectrumR = m_spectrumL;
+        m_waveformR = m_waveformL;
+        m_wasMono = true;
+    }
+    else
+    {
+        if (m_wasMono)
+        {
+            m_alignR.SyncStateFrom(m_alignL);
+            m_wasMono = false;
+        }
+        UpdateSpectrum(m_waveformR, m_spectrumR);
+        m_alignR.Align(m_waveformR);
+    }
 
     // 4. Update beat detection values
     m_bass.Update(m_spectrumL, secondsSinceLastFrame, frame);

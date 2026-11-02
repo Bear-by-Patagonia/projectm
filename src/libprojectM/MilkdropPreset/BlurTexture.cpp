@@ -290,7 +290,7 @@ void BlurTexture::GetSafeBlurMinMaxValues(const PerFrameContext& perFrameContext
     {
         float avg = (blurMin[0] + blurMax[0]) * 0.5f;
         blurMin[0] = avg - fMinDist * 0.5f;
-        blurMax[0] = avg - fMinDist * 0.5f;
+        blurMax[0] = avg + fMinDist * 0.5f;
     }
     blurMax[1] = std::min(blurMax[0], blurMax[1]);
     blurMin[1] = std::max(blurMin[0], blurMin[1]);
@@ -298,7 +298,7 @@ void BlurTexture::GetSafeBlurMinMaxValues(const PerFrameContext& perFrameContext
     {
         float avg = (blurMin[1] + blurMax[1]) * 0.5f;
         blurMin[1] = avg - fMinDist * 0.5f;
-        blurMax[1] = avg - fMinDist * 0.5f;
+        blurMax[1] = avg + fMinDist * 0.5f;
     }
     blurMax[2] = std::min(blurMax[1], blurMax[2]);
     blurMin[2] = std::max(blurMin[1], blurMin[2]);
@@ -306,7 +306,7 @@ void BlurTexture::GetSafeBlurMinMaxValues(const PerFrameContext& perFrameContext
     {
         float avg = (blurMin[2] + blurMax[2]) * 0.5f;
         blurMin[2] = avg - fMinDist * 0.5f;
-        blurMax[2] = avg - fMinDist * 0.5f;
+        blurMax[2] = avg + fMinDist * 0.5f;
     }
 }
 

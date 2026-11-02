@@ -256,6 +256,21 @@ void WaveformAligner::Align(WaveformBuffer& newWaveform)
     ResampleOctaves(m_oldWaveformMips, newWaveform);
 }
 
+void WaveformAligner::SyncStateFrom(const WaveformAligner& other)
+{
+    if (!m_alignWaveReady && other.m_alignWaveReady)
+    {
+        GenerateWeights();
+        m_alignWaveReady = true;
+    }
+    for (uint32_t octave = 0; octave < m_octaves && octave < other.m_octaves; ++octave)
+    {
+        std::copy_n(other.m_oldWaveformMips[octave].begin(),
+                    m_octaveSamples[octave],
+                    m_oldWaveformMips[octave].begin());
+    }
+}
+
 
 } // namespace Audio
 } // namespace libprojectM

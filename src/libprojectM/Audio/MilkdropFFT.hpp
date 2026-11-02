@@ -155,8 +155,10 @@ private:
     std::vector<size_t> m_bitRevTable; //!< Index table for frequency-specific waveform data lookups.
     std::vector<float> m_envelope; //!< Equalizer envelope table.
     std::vector<float> m_equalize; //!< Equalization values.
-    std::vector<std::complex<float>> m_cosSinTable; //!< Table with complex polar coordinates for the different frequency domains used in the FFT.
-    std::vector<std::complex<float>> m_spectrumData; //!< Reusable complex FFT scratch buffer to avoid per-frame heap allocations.
+    std::vector<float> m_cosTable; //!< Real part of Nth roots of unity twiddle steps.
+    std::vector<float> m_sinTable; //!< Imaginary part of Nth roots of unity twiddle steps.
+    std::vector<float> m_real; //!< Pre-allocated SoA real FFT scratch buffer.
+    std::vector<float> m_imag; //!< Pre-allocated SoA imaginary FFT scratch buffer.
 };
 
 } // namespace Audio

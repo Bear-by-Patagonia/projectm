@@ -13,6 +13,8 @@
 #include <glm/mat4x4.hpp>
 
 #include <algorithm>
+#include <cctype>
+#include <cstring>
 #include <regex>
 #include <set>
 
@@ -71,6 +73,21 @@ auto MilkdropShader::UsesDiscard() const -> bool
     return m_usesDiscard;
 }
 
+auto MilkdropShader::UsesPolarCoords() const -> bool
+{
+    return m_usesPolarCoords;
+}
+
+auto MilkdropShader::UsesHueShader() const -> bool
+{
+    return m_usesHueShader;
+}
+
+auto MilkdropShader::UsesPerFrameUBO() const -> bool
+{
+    return m_usesPerFrameUbo;
+}
+
 auto MilkdropShader::TranspileToGLSLSource(const std::string& presetShaderCode) -> std::string
 {
     LoadCode(presetShaderCode);
@@ -115,7 +132,7 @@ auto MilkdropShader::TranspileToGLSLSource(const std::string& presetShaderCode) 
     }
 
     std::string glslResult = GenerateGLSLSource(samplerDeclarations, texSizeDeclarations, mainSamplerNames, m_preprocessedCode);
-    m_usesDiscard = (glslResult.find("discard") != std::string::npos);
+    UpdateShaderUsageFlags(glslResult);
     return glslResult;
 }
 
@@ -148,6 +165,15 @@ MilkdropShader::MilkdropShader(ShaderType type)
     m_locC.fill(-1);
     m_locQ.fill(-1);
     m_locRot.fill(-1);
+}
+
+MilkdropShader::~MilkdropShader()
+{
+    if (m_perFrameUbo != 0)
+    {
+        glDeleteBuffers(1, &m_perFrameUbo);
+        m_perFrameUbo = 0;
+    }
 }
 
 void MilkdropShader::LoadCode(const std::string& presetShaderCode)
@@ -278,46 +304,98 @@ void MilkdropShader::LoadVariables(const PresetState& presetState, const PerFram
 
     m_shader.SetUniformMat4x4(m_locVertexTransformation, PresetState::orthogonalProjection);
 
-    if (m_locRandFrame >= 0)
+    if (m_usesPerFrameUbo && m_perFrameUbo != 0)
     {
-        float const randFrame[4] = {floatRand(), floatRand(), floatRand(), floatRand()};
-        m_shader.SetUniformFloat4(m_locRandFrame, randFrame);
-    }
-    if (m_locRandPreset >= 0)
-    {
-        m_shader.SetUniformFloat4(m_locRandPreset, m_randValues.data());
-    }
+        PerFrameUBOData ubo{};
+        if (m_hasRandFrameUniform)
+        {
+            ubo.rand_frame[0] = floatRand();
+            ubo.rand_frame[1] = floatRand();
+            ubo.rand_frame[2] = floatRand();
+            ubo.rand_frame[3] = floatRand();
+        }
+        std::memcpy(ubo.rand_preset, m_randValues.data(), sizeof(ubo.rand_preset));
+        std::memcpy(ubo.c[0], presetState.uniformCache.c0, sizeof(float) * 4);
+        ubo.c[1][0] = (m_type == ShaderType::CompositeShader && s_hdrPeakModeEnabled) ? 1.0f : 0.0f;
+        ubo.c[1][1] = 0.0f;
+        ubo.c[1][2] = 0.0f;
+        ubo.c[1][3] = 0.0f;
+        std::memcpy(ubo.c[2], presetState.uniformCache.c2, sizeof(float) * 4);
+        std::memcpy(ubo.c[3], presetState.uniformCache.c3, sizeof(float) * 4);
+        std::memcpy(ubo.c[4], presetState.uniformCache.c4, sizeof(float) * 4);
+        std::memcpy(ubo.c[5], presetState.uniformCache.c5, sizeof(float) * 4);
+        std::memcpy(ubo.c[6], presetState.uniformCache.c6, sizeof(float) * 4);
+        std::memcpy(ubo.c[7], presetState.uniformCache.c7, sizeof(float) * 4);
+        if (m_hasFastTrigUniforms)
+        {
+            std::memcpy(ubo.c[8], presetState.uniformCache.c8, sizeof(float) * 4);
+            std::memcpy(ubo.c[9], presetState.uniformCache.c9, sizeof(float) * 4);
+        }
+        if (m_hasSlowTrigUniforms)
+        {
+            std::memcpy(ubo.c[10], presetState.uniformCache.c10, sizeof(float) * 4);
+            std::memcpy(ubo.c[11], presetState.uniformCache.c11, sizeof(float) * 4);
+        }
+        std::memcpy(ubo.c[12], presetState.uniformCache.c12, sizeof(float) * 4);
+        std::memcpy(ubo.c[13], presetState.uniformCache.c13, sizeof(float) * 4);
+        std::memcpy(ubo.q, presetState.uniformCache.qValues, sizeof(ubo.q));
 
-    if (m_locC[0] >= 0) m_shader.SetUniformFloat4(m_locC[0], presetState.uniformCache.c0);
-    if (m_locC[1] >= 0)
-    {
-        float const c1[4] = {(m_type == ShaderType::CompositeShader && s_hdrPeakModeEnabled) ? 1.0f : 0.0f,
-                             0.0f,
-                             0.0f,
-                             0.0f};
-        m_shader.SetUniformFloat4(m_locC[1], c1);
+        glBindBuffer(GL_UNIFORM_BUFFER, m_perFrameUbo);
+        glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(PerFrameUBOData), &ubo);
+        glBindBufferBase(GL_UNIFORM_BUFFER, 0, m_perFrameUbo);
+        glBindBuffer(GL_UNIFORM_BUFFER, 0);
     }
-    if (m_locC[2] >= 0) m_shader.SetUniformFloat4(m_locC[2], presetState.uniformCache.c2);
-    if (m_locC[3] >= 0) m_shader.SetUniformFloat4(m_locC[3], presetState.uniformCache.c3);
-    if (m_locC[4] >= 0) m_shader.SetUniformFloat4(m_locC[4], presetState.uniformCache.c4);
-    if (m_locC[5] >= 0) m_shader.SetUniformFloat4(m_locC[5], presetState.uniformCache.c5);
-    if (m_locC[6] >= 0) m_shader.SetUniformFloat4(m_locC[6], presetState.uniformCache.c6);
-    if (m_locC[7] >= 0) m_shader.SetUniformFloat4(m_locC[7], presetState.uniformCache.c7);
-
-    if (m_hasFastTrigUniforms)
+    else
     {
-        if (m_locC[8] >= 0) m_shader.SetUniformFloat4(m_locC[8], presetState.uniformCache.c8);
-        if (m_locC[9] >= 0) m_shader.SetUniformFloat4(m_locC[9], presetState.uniformCache.c9);
-    }
+        if (m_locRandFrame >= 0)
+        {
+            float const randFrame[4] = {floatRand(), floatRand(), floatRand(), floatRand()};
+            m_shader.SetUniformFloat4(m_locRandFrame, randFrame);
+        }
+        if (m_locRandPreset >= 0)
+        {
+            m_shader.SetUniformFloat4(m_locRandPreset, m_randValues.data());
+        }
 
-    if (m_hasSlowTrigUniforms)
-    {
-        if (m_locC[10] >= 0) m_shader.SetUniformFloat4(m_locC[10], presetState.uniformCache.c10);
-        if (m_locC[11] >= 0) m_shader.SetUniformFloat4(m_locC[11], presetState.uniformCache.c11);
-    }
+        if (m_locC[0] >= 0) m_shader.SetUniformFloat4(m_locC[0], presetState.uniformCache.c0);
+        if (m_locC[1] >= 0)
+        {
+            float const c1[4] = {(m_type == ShaderType::CompositeShader && s_hdrPeakModeEnabled) ? 1.0f : 0.0f,
+                                 0.0f,
+                                 0.0f,
+                                 0.0f};
+            m_shader.SetUniformFloat4(m_locC[1], c1);
+        }
+        if (m_locC[2] >= 0) m_shader.SetUniformFloat4(m_locC[2], presetState.uniformCache.c2);
+        if (m_locC[3] >= 0) m_shader.SetUniformFloat4(m_locC[3], presetState.uniformCache.c3);
+        if (m_locC[4] >= 0) m_shader.SetUniformFloat4(m_locC[4], presetState.uniformCache.c4);
+        if (m_locC[5] >= 0) m_shader.SetUniformFloat4(m_locC[5], presetState.uniformCache.c5);
+        if (m_locC[6] >= 0) m_shader.SetUniformFloat4(m_locC[6], presetState.uniformCache.c6);
+        if (m_locC[7] >= 0) m_shader.SetUniformFloat4(m_locC[7], presetState.uniformCache.c7);
 
-    if (m_locC[12] >= 0) m_shader.SetUniformFloat4(m_locC[12], presetState.uniformCache.c12);
-    if (m_locC[13] >= 0) m_shader.SetUniformFloat4(m_locC[13], presetState.uniformCache.c13);
+        if (m_hasFastTrigUniforms)
+        {
+            if (m_locC[8] >= 0) m_shader.SetUniformFloat4(m_locC[8], presetState.uniformCache.c8);
+            if (m_locC[9] >= 0) m_shader.SetUniformFloat4(m_locC[9], presetState.uniformCache.c9);
+        }
+
+        if (m_hasSlowTrigUniforms)
+        {
+            if (m_locC[10] >= 0) m_shader.SetUniformFloat4(m_locC[10], presetState.uniformCache.c10);
+            if (m_locC[11] >= 0) m_shader.SetUniformFloat4(m_locC[11], presetState.uniformCache.c11);
+        }
+
+        if (m_locC[12] >= 0) m_shader.SetUniformFloat4(m_locC[12], presetState.uniformCache.c12);
+        if (m_locC[13] >= 0) m_shader.SetUniformFloat4(m_locC[13], presetState.uniformCache.c13);
+
+        for (size_t i = 0; i < 8; ++i)
+        {
+            if (m_locQ[i] >= 0)
+            {
+                m_shader.SetUniformFloat4(m_locQ[i], presetState.uniformCache.qValues[i]);
+            }
+        }
+    }
 
     // Lazy 3D Rotations: ONLY compute if preset shader actually references any rot_* uniform
     if (m_has3DRotationUniforms)
@@ -362,17 +440,8 @@ void MilkdropShader::LoadVariables(const PresetState& presetState, const PerFram
         }
     }
 
-    // Set program uniform "_q[a-h]" values alias q[1-32] directly from precalculated cache
-    for (size_t i = 0; i < 8; ++i)
-    {
-        if (m_locQ[i] >= 0)
-        {
-            m_shader.SetUniformFloat4(m_locQ[i], presetState.uniformCache.qValues[i]);
-        }
-    }
-
-    m_shader.SetUniformInt("u_curlNoise", s_curlNoiseEnabled ? 1 : 0);
-    m_shader.SetUniformInt("u_catmullRom", s_catmullRomEnabled ? 1 : 0);
+    m_shader.SetUniformInt(m_locCurlNoise, s_curlNoiseEnabled ? 1 : 0);
+    m_shader.SetUniformInt(m_locCatmullRom, s_catmullRomEnabled ? 1 : 0);
 
     // Bind all texture and sampler descriptors. This includes the main and blur textures.
     GLint textureUnit{0};
@@ -741,23 +810,30 @@ auto MilkdropShader::GenerateGLSLSource(const std::set<std::string>& samplerDecl
         throw Renderer::ShaderException("Error translating HLSL " + shaderTypeString + " shader: Preprocessing failed.");
     }
 
-    // Remove previous shader and sampler declarations (single line or multiline blocks)
-    std::smatch matches;
-    while (std::regex_search(sourcePreprocessed, matches, std::regex(R"((?:uniform\s+)?sampler(?:2D|3D)?\s+[\w\d_]+(?:\s*=\s*sampler_state\s*\{[\s\S]*?\}\s*;?|\s*=\s*sampler_state\s*;?|\s*;?))")))
-    {
-        sourcePreprocessed.replace(matches.position(), matches.length(), "");
-    }
-    while (std::regex_search(sourcePreprocessed, matches, std::regex(R"(sampler_state\s*\{[\s\S]*?\}\s*;?)")))
-    {
-        sourcePreprocessed.replace(matches.position(), matches.length(), "");
-    }
-    while (std::regex_search(sourcePreprocessed, matches, std::regex(R"(sampler(?:2D|3D|)(\s+|\().*)")))
-    {
-        sourcePreprocessed.replace(matches.position(), matches.length(), "");
-    }
+    // Remove previous shader and sampler declarations using static precompiled regexes
+    static const std::regex s_reSamplerDecl(
+        R"((?:uniform\s+)?(?:sampler(?:1D|2D|3D|CUBE)?|Texture(?:1D|2D|3D))\s+[\w\d_]+(?:\s*:\s*register\s*\([^\)]*\))?(?:\s*=\s*sampler_state\s*\{[\s\S]*?\}\s*;?|\s*=\s*sampler_state\s*;?|\s*;?))");
+    static const std::regex s_reSamplerState(
+        R"((?:SamplerState\s+[\w\d_]+(?:\s*:\s*register\s*\([^\)]*\))?\s*;?|sampler_state\s*\{[\s\S]*?\}\s*;?))");
+    static const std::regex s_reSamplerCall(
+        R"(sampler(?:1D|2D|3D|CUBE|)(\s+|\().*)");
+    static const std::regex s_reTexSizeDecl(
+        R"((?:uniform\s+)?(?:float[234]|vec[234])\s+texsize_[^;\n]*;?)");
 
-    // Remove previous texsize declarations
-    while (std::regex_search(sourcePreprocessed, matches, std::regex("float4\\s+texsize_.*")))
+    std::smatch matches;
+    while (std::regex_search(sourcePreprocessed, matches, s_reSamplerDecl))
+    {
+        sourcePreprocessed.replace(matches.position(), matches.length(), "");
+    }
+    while (std::regex_search(sourcePreprocessed, matches, s_reSamplerState))
+    {
+        sourcePreprocessed.replace(matches.position(), matches.length(), "");
+    }
+    while (std::regex_search(sourcePreprocessed, matches, s_reSamplerCall))
+    {
+        sourcePreprocessed.replace(matches.position(), matches.length(), "");
+    }
+    while (std::regex_search(sourcePreprocessed, matches, s_reTexSizeDecl))
     {
         sourcePreprocessed.replace(matches.position(), matches.length(), "");
     }
@@ -874,6 +950,147 @@ auto MilkdropShader::GenerateGLSLSource(const std::set<std::string>& samplerDecl
     }
     const bool injectBicubicMain = (s_catmullRomEnabled && m_type == ShaderType::WarpShader && mainTapCount >= 1 && mainTapCount <= 2);
 
+    auto hasIdentifier = [](const std::string& text, const char* ident) -> bool {
+        const size_t identLen = std::strlen(ident);
+        size_t pos = 0;
+        while ((pos = text.find(ident, pos)) != std::string::npos)
+        {
+            const bool leftOk = (pos == 0) ||
+                                (!std::isalnum(static_cast<unsigned char>(text[pos - 1])) && text[pos - 1] != '_');
+            const size_t after = pos + identLen;
+            const bool rightOk = (after >= text.size()) ||
+                                 (!std::isalnum(static_cast<unsigned char>(text[after])) && text[after] != '_');
+            if (leftOk && rightOk)
+            {
+                return true;
+            }
+            pos += identLen;
+        }
+        return false;
+    };
+
+    // Strip unreferenced 3D rotation matrix declarations emitted unconditionally from PresetShaderHeader
+    static constexpr const char* kRotUniformNames[24] = {
+        "rot_s1", "rot_s2", "rot_s3", "rot_s4",
+        "rot_d1", "rot_d2", "rot_d3", "rot_d4",
+        "rot_f1", "rot_f2", "rot_f3", "rot_f4",
+        "rot_vf1", "rot_vf2", "rot_vf3", "rot_vf4",
+        "rot_uf1", "rot_uf2", "rot_uf3", "rot_uf4",
+        "rot_rand1", "rot_rand2", "rot_rand3", "rot_rand4"
+    };
+    for (const char* rotName : kRotUniformNames)
+    {
+        const std::string declLine = std::string("uniform mat3x4 ") + rotName + ";\n";
+        size_t const pos = glslResult.find(declLine);
+        if (pos != std::string::npos)
+        {
+            glslResult.erase(pos, declLine.length());
+            if (hasIdentifier(glslResult, rotName))
+            {
+                glslResult.insert(pos, declLine);
+            }
+        }
+    }
+
+    // Pack referenced per-frame vec4 uniforms into a compact 384-byte std140 PerFrameBlock UBO
+    // while omitting the block completely if the shader uses zero per-frame vec4 constants.
+    const auto glslVersion = MilkdropStaticShaders::Get()->GetGlslGeneratorVersion();
+    const bool supportsUbo = (glslVersion == M4::GLSLGenerator::Version_140 ||
+                              glslVersion == M4::GLSLGenerator::Version_150 ||
+                              glslVersion == M4::GLSLGenerator::Version_330 ||
+                              glslVersion == M4::GLSLGenerator::Version_300_ES);
+
+    bool emitPerFrameUbo = false;
+    if (supportsUbo)
+    {
+        static constexpr const char* kPerFrameVec4Names[24] = {
+            "rand_frame", "rand_preset",
+            "_c0", "_c1", "_c2", "_c3", "_c4", "_c5", "_c6",
+            "_c7", "_c8", "_c9", "_c10", "_c11", "_c12", "_c13",
+            "_qa", "_qb", "_qc", "_qd", "_qe", "_qf", "_qg", "_qh"
+        };
+
+        for (const char* varName : kPerFrameVec4Names)
+        {
+            const std::string declWithNewline = std::string("uniform vec4 ") + varName + ";\n";
+            size_t pos = glslResult.find(declWithNewline);
+            if (pos != std::string::npos)
+            {
+                glslResult.erase(pos, declWithNewline.length());
+                continue;
+            }
+            const std::string declPlain = std::string("uniform vec4 ") + varName + ";";
+            pos = glslResult.find(declPlain);
+            if (pos != std::string::npos)
+            {
+                glslResult.erase(pos, declPlain.length());
+            }
+        }
+
+        bool usesAnyPerFrameVec4 = injectBicubicMain;
+        if (!usesAnyPerFrameVec4)
+        {
+            for (const char* varName : kPerFrameVec4Names)
+            {
+                if (hasIdentifier(glslResult, varName))
+                {
+                    usesAnyPerFrameVec4 = true;
+                    break;
+                }
+            }
+        }
+
+        if (usesAnyPerFrameVec4)
+        {
+            emitPerFrameUbo = true;
+            static const std::string s_perFrameBlockDecl = R"(layout(std140) uniform PerFrameBlock {
+    vec4 rand_frame;
+    vec4 rand_preset;
+    vec4 _c0;
+    vec4 _c1;
+    vec4 _c2;
+    vec4 _c3;
+    vec4 _c4;
+    vec4 _c5;
+    vec4 _c6;
+    vec4 _c7;
+    vec4 _c8;
+    vec4 _c9;
+    vec4 _c10;
+    vec4 _c11;
+    vec4 _c12;
+    vec4 _c13;
+    vec4 _qa;
+    vec4 _qb;
+    vec4 _qc;
+    vec4 _qd;
+    vec4 _qe;
+    vec4 _qf;
+    vec4 _qg;
+    vec4 _qh;
+};
+)";
+            size_t blockInsertPos = std::string::npos;
+            size_t const fragOutPos = glslResult.find("out vec4 rast_FragData[");
+            if (fragOutPos != std::string::npos)
+            {
+                size_t const lineEnd = glslResult.find('\n', fragOutPos);
+                if (lineEnd != std::string::npos)
+                {
+                    blockInsertPos = lineEnd + 1;
+                }
+            }
+            if (blockInsertPos == std::string::npos)
+            {
+                blockInsertPos = glslResult.find("void PS(");
+            }
+            if (blockInsertPos != std::string::npos)
+            {
+                glslResult.insert(blockInsertPos, s_perFrameBlockDecl);
+            }
+        }
+    }
+
     // Zero-Flip UV Coordinate Scheme:
     // Both m_previousFrameBuffer and m_currentFrameBuffer are stored right-side up in OpenGL FBO orientation (O_GL).
     // Replacing main-texture lookups sample(S, uv) with sample(S, vec2(uv.x, 1.0 - uv.y)) satisfies the exact
@@ -881,7 +1098,7 @@ auto MilkdropShader::GenerateGLSLSource(const std::set<std::string>& samplerDecl
     std::string zeroFlipHelpers;
     if (injectBicubicMain)
     {
-        if (glslResult.find("uniform vec4 _c7;") == std::string::npos && glslResult.find("_c7") == std::string::npos)
+        if (!emitPerFrameUbo && glslResult.find("uniform vec4 _c7;") == std::string::npos && glslResult.find("_c7") == std::string::npos)
         {
             zeroFlipHelpers += "uniform vec4 _c7;\n";
         }
@@ -1019,7 +1236,7 @@ void MilkdropShader::TranspileHLSLShader(const PresetState& presetState, std::st
     }
 
     std::string glslResult = GenerateGLSLSource(samplerDeclarations, texSizeDeclarations, mainSamplerNames, program);
-    m_usesDiscard = (glslResult.find("discard") != std::string::npos);
+    UpdateShaderUsageFlags(glslResult);
 
     // Compile the preset shader fragment shader with the standard vertex shader.
     if (m_type == ShaderType::WarpShader)
@@ -1034,29 +1251,118 @@ void MilkdropShader::TranspileHLSLShader(const PresetState& presetState, std::st
     CacheUniformLocations();
 }
 
+void MilkdropShader::UpdateShaderUsageFlags(const std::string& glslSource)
+{
+    auto containsIdentifier = [](const std::string& text, const char* ident, size_t startOffset = 0, size_t endOffset = std::string::npos) -> bool {
+        const size_t identLen = std::strlen(ident);
+        const size_t limit = std::min(endOffset, text.size());
+        size_t pos = startOffset;
+        while (pos < limit && (pos = text.find(ident, pos)) != std::string::npos && pos < limit)
+        {
+            const bool leftOk = (pos == 0) ||
+                                (!std::isalnum(static_cast<unsigned char>(text[pos - 1])) && text[pos - 1] != '_');
+            const size_t after = pos + identLen;
+            const bool rightOk = (after >= text.size()) ||
+                                 (!std::isalnum(static_cast<unsigned char>(text[after])) && text[after] != '_');
+            if (leftOk && rightOk)
+            {
+                return true;
+            }
+            pos += identLen;
+        }
+        return false;
+    };
+
+    m_usesDiscard = containsIdentifier(glslSource, "discard");
+    m_usesPerFrameUbo = (glslSource.find("uniform PerFrameBlock") != std::string::npos);
+
+    size_t codeAfterUbo = 0;
+    if (m_usesPerFrameUbo)
+    {
+        size_t const blockPos = glslSource.find("uniform PerFrameBlock");
+        size_t const blockClose = glslSource.find("};", blockPos);
+        if (blockClose != std::string::npos)
+        {
+            codeAfterUbo = blockClose + 2;
+        }
+    }
+
+    m_hasRandFrameUniform = containsIdentifier(glslSource, "rand_frame", codeAfterUbo);
+    m_hasFastTrigUniforms = containsIdentifier(glslSource, "_c8", codeAfterUbo) ||
+                            containsIdentifier(glslSource, "_c9", codeAfterUbo);
+    m_hasSlowTrigUniforms = containsIdentifier(glslSource, "_c10", codeAfterUbo) ||
+                            containsIdentifier(glslSource, "_c11", codeAfterUbo);
+
+    m_usesPolarCoords = false;
+    m_usesHueShader = false;
+    size_t const psSig = glslSource.find("void PS(");
+    if (psSig != std::string::npos)
+    {
+        size_t const psOpen = glslSource.find('{', psSig);
+        size_t const mainSig = glslSource.find("void main()", psSig);
+        if (psOpen != std::string::npos)
+        {
+            size_t const psEnd = (mainSig != std::string::npos) ? mainSig : glslSource.size();
+            m_usesPolarCoords = containsIdentifier(glslSource, "_rad_ang", psOpen + 1, psEnd);
+            m_usesHueShader = (m_type == ShaderType::CompositeShader) &&
+                              containsIdentifier(glslSource, "_vDiffuse", psOpen + 1, psEnd);
+        }
+    }
+}
+
 void MilkdropShader::CacheUniformLocations()
 {
     m_locVertexTransformation = m_shader.GetUniformLocation("vertex_transformation");
-    m_locRandFrame = m_shader.GetUniformLocation("rand_frame");
-    m_locRandPreset = m_shader.GetUniformLocation("rand_preset");
+    m_locCurlNoise = m_shader.GetUniformLocation("u_curlNoise");
+    m_locCatmullRom = m_shader.GetUniformLocation("u_catmullRom");
 
-    static const char* const s_cVarNames[14] = {
-        "_c0", "_c1", "_c2", "_c3", "_c4", "_c5", "_c6",
-        "_c7", "_c8", "_c9", "_c10", "_c11", "_c12", "_c13"
-    };
-    for (size_t i = 0; i < 14; ++i)
+    if (m_usesPerFrameUbo && m_shader.Program() != 0)
     {
-        m_locC[i] = m_shader.GetUniformLocation(s_cVarNames[i]);
+        GLuint const blockIndex = glGetUniformBlockIndex(m_shader.Program(), "PerFrameBlock");
+        if (blockIndex != GL_INVALID_INDEX)
+        {
+            glUniformBlockBinding(m_shader.Program(), blockIndex, 0);
+            if (m_perFrameUbo == 0)
+            {
+                glGenBuffers(1, &m_perFrameUbo);
+                glBindBuffer(GL_UNIFORM_BUFFER, m_perFrameUbo);
+                glBufferData(GL_UNIFORM_BUFFER, sizeof(PerFrameUBOData), nullptr, GL_DYNAMIC_DRAW);
+                glBindBuffer(GL_UNIFORM_BUFFER, 0);
+            }
+            m_locRandFrame = -1;
+            m_locRandPreset = -1;
+            m_locC.fill(-1);
+            m_locQ.fill(-1);
+        }
+        else
+        {
+            m_usesPerFrameUbo = false;
+        }
     }
-    m_hasFastTrigUniforms = (m_locC[8] >= 0 || m_locC[9] >= 0);
-    m_hasSlowTrigUniforms = (m_locC[10] >= 0 || m_locC[11] >= 0);
 
-    static const char* const s_qVarNames[8] = {
-        "_qa", "_qb", "_qc", "_qd", "_qe", "_qf", "_qg", "_qh"
-    };
-    for (size_t i = 0; i < 8; ++i)
+    if (!m_usesPerFrameUbo)
     {
-        m_locQ[i] = m_shader.GetUniformLocation(s_qVarNames[i]);
+        m_locRandFrame = m_shader.GetUniformLocation("rand_frame");
+        m_locRandPreset = m_shader.GetUniformLocation("rand_preset");
+
+        static const char* const s_cVarNames[14] = {
+            "_c0", "_c1", "_c2", "_c3", "_c4", "_c5", "_c6",
+            "_c7", "_c8", "_c9", "_c10", "_c11", "_c12", "_c13"
+        };
+        for (size_t i = 0; i < 14; ++i)
+        {
+            m_locC[i] = m_shader.GetUniformLocation(s_cVarNames[i]);
+        }
+        m_hasFastTrigUniforms = (m_locC[8] >= 0 || m_locC[9] >= 0);
+        m_hasSlowTrigUniforms = (m_locC[10] >= 0 || m_locC[11] >= 0);
+
+        static const char* const s_qVarNames[8] = {
+            "_qa", "_qb", "_qc", "_qd", "_qe", "_qf", "_qg", "_qh"
+        };
+        for (size_t i = 0; i < 8; ++i)
+        {
+            m_locQ[i] = m_shader.GetUniformLocation(s_qVarNames[i]);
+        }
     }
 
     static const char* const s_rotVarNames[24] = {

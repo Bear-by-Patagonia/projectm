@@ -115,9 +115,12 @@ auto PresetFileParser::GetCode(const std::string& keyPrefix) const -> std::strin
 
     key.replace(0, lowerKey.length(), lowerKey);
 
+    char numBuf[16];
     for (int index{1}; index <= 99999; ++index)
     {
-        key.replace(lowerKey.length(), 5, std::to_string(index));
+        int const numLen = snprintf(numBuf, sizeof(numBuf), "%d", index);
+        key.resize(lowerKey.length());
+        key.append(numBuf, static_cast<size_t>(numLen));
         if (m_presetValues.find(key) == m_presetValues.end())
         {
             break;

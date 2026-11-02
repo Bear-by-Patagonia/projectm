@@ -88,6 +88,14 @@ public:
     bool Validate(std::string& validationMessage) const;
 
     /**
+     * @brief Returns the underlying OpenGL program handle (0 if not compiled).
+     */
+    auto Program() const noexcept -> GLuint
+    {
+        return m_shaderProgram;
+    }
+
+    /**
      * Binds the program into the current context.
      */
     void Bind() const;
@@ -112,6 +120,7 @@ public:
      * @param value The value to set.
      */
     void SetUniformInt(const char* uniform, int value) const;
+    void SetUniformInt(GLint location, int value) const;
 
     /**
      * @brief Sets a float vec2 uniform.

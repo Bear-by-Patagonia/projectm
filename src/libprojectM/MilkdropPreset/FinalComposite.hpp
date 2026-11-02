@@ -48,6 +48,17 @@ public:
      */
     auto CompositeShaderUsesDiscard() const -> bool;
 
+    struct FullscreenVertex
+    {
+        Renderer::Point position;
+        Renderer::TextureUV uv;
+    };
+
+    /**
+     * @brief Computes the 3-vertex oversized fullscreen triangle matching MilkDrop's composite UV orientation and half-texel offset.
+     */
+    static auto ComputeFullscreenTriangle(int viewportWidth, int viewportHeight) -> std::array<FullscreenVertex, 3>;
+
 private:
     /**
      * Composite mesh vertex with all required attributes.
@@ -90,8 +101,10 @@ private:
     static constexpr int vertexCount{compositeGridWidth * compositeGridHeight};
     static constexpr int indexCount{(compositeGridWidth - 2) * (compositeGridHeight - 2) * 6};
 
-    Renderer::Mesh m_compositeMesh;                                                                 //!< The composite shader mesh.
-    Renderer::VertexBuffer<Renderer::Point> m_radiusAngle{Renderer::VertexBufferUsage::StreamDraw}; //!< Additional vertex attribute array for radius and angle.
+    Renderer::Mesh m_compositeMesh;                                                                         //!< Polar/hue-interpolated 32x24 composite mesh.
+    Renderer::VertexBuffer<Renderer::Point> m_radiusAngle{Renderer::VertexBufferUsage::StreamDraw};         //!< Polar (rad, ang) attribute buffer for m_compositeMesh.
+    Renderer::Mesh m_fullscreenTriangle{Renderer::VertexBufferUsage::StaticDraw, true, true};               //!< Fast 3-vertex fullscreen triangle when polar/hue are unused.
+    Renderer::VertexBuffer<Renderer::Point> m_triangleRadiusAngle{Renderer::VertexBufferUsage::StaticDraw}; //!< Zero-initialized polar attribute buffer for m_fullscreenTriangle.
 
     int m_viewportWidth{};  //!< Last known viewport width.
     int m_viewportHeight{}; //!< Last known viewport height.

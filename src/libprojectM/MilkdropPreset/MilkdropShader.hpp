@@ -107,10 +107,39 @@ public:
      */
     static bool IsCatmullRomEnabled();
 
+    struct alignas(16) PerFrameUBOData
+    {
+        float rand_frame[4]{};
+        float rand_preset[4]{};
+        float c[14][4]{};
+        float q[8][4]{};
+    };
+    static_assert(sizeof(PerFrameUBOData) == 384, "PerFrameUBOData must be 384 bytes (24 x vec4 std140)");
+
+    /**
+     * @brief Destructor. Releases UBO handle if allocated.
+     */
+    ~MilkdropShader();
+
     /**
      * @brief Returns true if the transpiled GLSL fragment shader executes a discard instruction.
      */
     auto UsesDiscard() const -> bool;
+
+    /**
+     * @brief Returns true if the transpiled shader references polar coordinates (rad or ang).
+     */
+    auto UsesPolarCoords() const -> bool;
+
+    /**
+     * @brief Returns true if the transpiled composite shader references hue_shader (_vDiffuse).
+     */
+    auto UsesHueShader() const -> bool;
+
+    /**
+     * @brief Returns true if the transpiled shader emits a std140 PerFrameBlock UBO.
+     */
+    auto UsesPerFrameUBO() const -> bool;
 
     /**
      * @brief Pure CPU HLSL-to-GLSL transpilation entry point for unit testing without an OpenGL context.
@@ -158,6 +187,11 @@ private:
      */
     void CacheUniformLocations();
 
+    /**
+     * @brief Updates static shader feature flags (discard, polar coords, hue_shader, UBO) from generated GLSL.
+     */
+    void UpdateShaderUsageFlags(const std::string& glslSource);
+
     ShaderType m_type{ShaderType::WarpShader}; //!< Type of this shader.
     std::string m_fragmentShaderCode;          //!< The original preset fragment shader code.
     std::string m_preprocessedCode;            //!< The preprocessed preset shader code.
@@ -176,6 +210,8 @@ private:
 
     // Fast cached uniform locations
     GLint m_locVertexTransformation{-1};
+    GLint m_locCurlNoise{-1};
+    GLint m_locCatmullRom{-1};
     GLint m_locRandFrame{-1};
     GLint m_locRandPreset{-1};
     std::array<GLint, 14> m_locC{};
@@ -184,7 +220,12 @@ private:
     bool m_has3DRotationUniforms{false};
     bool m_hasFastTrigUniforms{false}; // _c8, _c9
     bool m_hasSlowTrigUniforms{false}; // _c10, _c11
+    bool m_hasRandFrameUniform{false};
     bool m_usesDiscard{false};
+    bool m_usesPolarCoords{false};
+    bool m_usesHueShader{false};
+    bool m_usesPerFrameUbo{false};
+    GLuint m_perFrameUbo{0};
 };
 
 } // namespace MilkdropPreset

@@ -36,6 +36,11 @@ public:
      */
     void Align(WaveformBuffer& newWaveform);
 
+    /**
+     * @brief Synchronizes alignment history from another channel when transitioning from mono to stereo.
+     */
+    void SyncStateFrom(const WaveformAligner& other);
+
 protected:
     void GenerateWeights();
     auto CalculateOffset(std::vector<WaveformBuffer>& newWaveformMips) -> int;

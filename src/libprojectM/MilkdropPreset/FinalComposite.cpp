@@ -88,6 +88,28 @@ FinalComposite::FinalComposite()
     m_compositeMesh.Indices().Resize(indexCount);
     m_compositeMesh.Update();
 
+    // Pre-allocate static 3-vertex fullscreen triangle fast-path mesh
+    m_fullscreenTriangle.SetRenderPrimitiveType(Renderer::Mesh::PrimitiveType::Triangles);
+    m_fullscreenTriangle.Bind();
+    m_triangleRadiusAngle.Bind();
+    m_triangleRadiusAngle.Resize(3);
+    for (size_t i = 0; i < 3; ++i)
+    {
+        m_triangleRadiusAngle[i] = {0.0f, 0.0f};
+    }
+    m_triangleRadiusAngle.InitializeAttributePointer(3);
+    Renderer::VertexBuffer<Renderer::Point>::SetEnableAttributeArray(3, true);
+    m_triangleRadiusAngle.Update();
+
+    m_fullscreenTriangle.SetVertexCount(3);
+    m_fullscreenTriangle.Indices().Resize(3);
+    for (uint32_t i = 0; i < 3; ++i)
+    {
+        m_fullscreenTriangle.Colors()[i] = {1.0f, 1.0f, 1.0f, 1.0f};
+        m_fullscreenTriangle.Indices()[i] = i;
+    }
+    m_fullscreenTriangle.Update();
+
     Renderer::Mesh::Unbind();
 }
 
@@ -148,16 +170,27 @@ void FinalComposite::Draw(const PresetState& presetState, const PerFrameContext&
     if (m_compositeShader)
     {
         InitializeMesh(presetState);
-        if (presetState.compositeShaderVersion > 0 || presetState.shader > 0.001f)
+
+        bool const hueActive = m_compositeShader->UsesHueShader() &&
+                               (presetState.compositeShaderVersion > 0 || presetState.shader > 0.001f);
+        bool const useGridMesh = m_compositeShader->UsesPolarCoords() || hueActive;
+
+        if (hueActive)
         {
             ApplyHueShaderColors(presetState);
         }
 
-        // Render the grid
         Renderer::BlendMode::SetBlendActive(false);
         m_compositeShader->LoadVariables(presetState, perFrameContext);
 
-        m_compositeMesh.Draw();
+        if (useGridMesh)
+        {
+            m_compositeMesh.Draw();
+        }
+        else
+        {
+            m_fullscreenTriangle.Draw();
+        }
         Renderer::Mesh::Unbind();
     }
 
@@ -172,6 +205,18 @@ auto FinalComposite::HasCompositeShader() const -> bool
 auto FinalComposite::CompositeShaderUsesDiscard() const -> bool
 {
     return m_compositeShader && m_compositeShader->UsesDiscard();
+}
+
+auto FinalComposite::ComputeFullscreenTriangle(int viewportWidth, int viewportHeight) -> std::array<FullscreenVertex, 3>
+{
+    float const halfTexelW = (viewportWidth > 0) ? (0.5f / static_cast<float>(viewportWidth)) : 0.0f;
+    float const halfTexelH = (viewportHeight > 0) ? (0.5f / static_cast<float>(viewportHeight)) : 0.0f;
+
+    return {{
+        {{-1.0f, -1.0f}, {0.0f + halfTexelW,  1.0f + halfTexelH}},
+        {{ 3.0f, -1.0f}, {2.0f + halfTexelW,  1.0f + halfTexelH}},
+        {{-1.0f,  3.0f}, {0.0f + halfTexelW, -1.0f + halfTexelH}},
+    }};
 }
 
 void FinalComposite::InitializeMesh(const PresetState& presetState)
@@ -338,6 +383,15 @@ void FinalComposite::InitializeMesh(const PresetState& presetState)
     // Update mesh geometry and indices.
     m_compositeMesh.Update();
     m_radiusAngle.Update();
+
+    auto const tri = ComputeFullscreenTriangle(presetState.renderContext.viewportSizeX,
+                                               presetState.renderContext.viewportSizeY);
+    for (size_t i = 0; i < 3; ++i)
+    {
+        m_fullscreenTriangle.Vertices()[i] = tri[i].position;
+        m_fullscreenTriangle.UVs()[i] = tri[i].uv;
+    }
+    m_fullscreenTriangle.Update();
 
     m_viewportWidth = presetState.renderContext.viewportSizeX;
     m_viewportHeight = presetState.renderContext.viewportSizeY;

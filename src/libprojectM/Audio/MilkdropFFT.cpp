@@ -29,6 +29,13 @@ OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "Audio/MilkdropFFT.hpp"
 
+#include <algorithm>
+#include <cmath>
+
+#if defined(__aarch64__) && (defined(__ARM_NEON) || defined(__ARM_NEON__))
+#include <arm_neon.h>
+#endif
+
 namespace libprojectM {
 namespace Audio {
 
@@ -42,6 +49,8 @@ MilkdropFFT::MilkdropFFT(size_t samplesIn, size_t samplesOut, bool equalize, flo
     InitCosSinTable();
     InitEnvelopeTable(envelopePower);
     InitEqualizeTable(equalize);
+    m_real.resize(m_numFrequencies, 0.0f);
+    m_imag.resize(m_numFrequencies, 0.0f);
 }
 
 void MilkdropFFT::InitEnvelopeTable(float power)
@@ -134,14 +143,16 @@ void MilkdropFFT::InitCosSinTable()
         dftsize <<= 1;
     }
 
-    m_cosSinTable.resize(tabsize);
+    m_cosTable.resize(tabsize);
+    m_sinTable.resize(tabsize);
 
     dftsize = 2;
     size_t index{0};
     while (dftsize <= m_numFrequencies)
     {
         auto const theta{-2.0f * PI / static_cast<float>(dftsize)};
-        m_cosSinTable[index] = std::polar(1.0f, theta); // Radius 1 is the unity circle.
+        m_cosTable[index] = std::cos(theta);
+        m_sinTable[index] = std::sin(theta);
         index++;
         dftsize <<= 1;
     }
@@ -149,35 +160,42 @@ void MilkdropFFT::InitCosSinTable()
 
 void MilkdropFFT::TimeToFrequencyDomain(const std::vector<float>& waveformData, std::vector<float>& spectralData)
 {
-    if (m_bitRevTable.empty() || m_cosSinTable.empty() || waveformData.size() < m_samplesIn)
+    if (m_bitRevTable.empty() || m_cosTable.empty() || waveformData.size() < m_samplesIn)
     {
         spectralData.clear();
         return;
     }
 
-    // 1. Set up input to the FFT
-    m_spectrumData.resize(m_numFrequencies);
+    // 1. Set up SoA input to the FFT without heap allocations
+    if (m_real.size() != m_numFrequencies)
+    {
+        m_real.resize(m_numFrequencies, 0.0f);
+        m_imag.resize(m_numFrequencies, 0.0f);
+    }
+    std::fill(m_imag.begin(), m_imag.end(), 0.0f);
+
+    float* const re = m_real.data();
+    float* const im = m_imag.data();
+    const size_t* const bitRev = m_bitRevTable.data();
+    const float* const env = m_envelope.data();
+    const float* const wave = waveformData.data();
+
     for (size_t i = 0; i < m_numFrequencies; i++)
     {
-        size_t const idx{m_bitRevTable[i]};
-        if (idx < m_samplesIn)
-        {
-            m_spectrumData[i] = {waveformData[idx] * m_envelope[idx], 0.0f};
-        }
-        else
-        {
-            m_spectrumData[i] = {0.0f, 0.0f};
-        }
+        size_t const idx{bitRev[i]};
+        re[i] = (idx < m_samplesIn) ? (wave[idx] * env[idx]) : 0.0f;
     }
 
-    // 2. Perform FFT
+    // 2. Perform explicit scalar-float radix-2 butterfly (avoids Annex G __mulsc3 runtime calls)
     size_t dftSize{2};
     size_t octave{0};
 
     while (dftSize <= m_numFrequencies)
     {
-        std::complex<float> w{1.0f, 0.0f};
-        std::complex<float> const wp{m_cosSinTable[octave]};
+        float wr = 1.0f;
+        float wi = 0.0f;
+        float const wpr = m_cosTable[octave];
+        float const wpi = m_sinTable[octave];
 
         size_t const hdftsize{dftSize >> 1};
 
@@ -186,23 +204,49 @@ void MilkdropFFT::TimeToFrequencyDomain(const std::vector<float>& waveformData, 
             for (size_t i = m; i < m_numFrequencies; i += dftSize)
             {
                 size_t const j{i + hdftsize};
-                std::complex<float> const tempNum{m_spectrumData[j] * w};
-                m_spectrumData[j] = m_spectrumData[i] - tempNum;
-                m_spectrumData[i] = m_spectrumData[i] + tempNum;
+                float const rj = re[j];
+                float const ij = im[j];
+                float const tr = rj * wr - ij * wi;
+                float const ti = rj * wi + ij * wr;
+                float const ri = re[i];
+                float const ii = im[i];
+                re[j] = ri - tr;
+                im[j] = ii - ti;
+                re[i] = ri + tr;
+                im[i] = ii + ti;
             }
 
-            w *= wp;
+            float const nextWr = wr * wpr - wi * wpi;
+            wi = wr * wpi + wi * wpr;
+            wr = nextWr;
         }
 
         dftSize <<= 1;
         octave++;
     }
 
-    // 3. Take the magnitude & eventually equalize it (on a log10 scale) for output
-    spectralData.resize(m_numFrequencies / 2);
-    for (size_t i = 0; i < m_numFrequencies / 2; i++)
+    // 3. Compute magnitude & equalization via contiguous SoA SIMD
+    size_t const halfFreq = m_numFrequencies / 2;
+    spectralData.resize(halfFreq);
+    float* const out = spectralData.data();
+    const float* const eq = m_equalize.data();
+    size_t i = 0;
+
+#if defined(__aarch64__) && (defined(__ARM_NEON) || defined(__ARM_NEON__))
+    for (; i + 4 <= halfFreq; i += 4)
     {
-        spectralData[i] = m_equalize[i] * std::abs(m_spectrumData[i]);
+        float32x4_t const vRe = vld1q_f32(re + i);
+        float32x4_t const vIm = vld1q_f32(im + i);
+        float32x4_t const vMagSq = vfmaq_f32(vmulq_f32(vRe, vRe), vIm, vIm);
+        float32x4_t const vMag = vsqrtq_f32(vMagSq);
+        float32x4_t const vEq = vld1q_f32(eq + i);
+        vst1q_f32(out + i, vmulq_f32(vMag, vEq));
+    }
+#endif
+
+    for (; i < halfFreq; i++)
+    {
+        out[i] = eq[i] * std::sqrt(re[i] * re[i] + im[i] * im[i]);
     }
 }
 

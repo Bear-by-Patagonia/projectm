@@ -48,7 +48,10 @@ vec2 getAnalyticalCurlNoise(vec2 p, float t) {
 void main() {
     gl_Position = vertex_transformation * vec4(pos, 0.0, 1.0);
 
-    float zoom2 = pow(zoom, pow(zoomExp, radius * 2.0 - 1.0));
+    float safeZoom = max(zoom, 0.0001);
+    float safeZoomExp = max(zoomExp, 0.0001);
+    float zoomExponent = pow(safeZoomExp, clamp(radius * 2.0 - 1.0, -10.0, 10.0));
+    float zoom2 = clamp(pow(safeZoom, zoomExponent), 0.0001, 10000.0);
     float zoom2Inverse = 1.0 / zoom2;
 
     // Initial texture coordinates, with built-in zoom factor
@@ -59,30 +62,37 @@ void main() {
     vec2 uv_original = vec2(pos.x * 0.5 + 0.5 + texelOffset.x,
                             pos.y * 0.5 + 0.5 + texelOffset.y);
 
-    // Stretch on X, Y
-    u = (u - warp_center.x) / stretch.x + warp_center.x;
-    v = (v - warp_center.y) / stretch.y + warp_center.y;
+    // Stretch on X, Y with zero-division safeguard
+    vec2 safeStretch = stretch;
+    if (abs(safeStretch.x) < 0.0001) safeStretch.x = (safeStretch.x < 0.0) ? -0.0001 : 0.0001;
+    if (abs(safeStretch.y) < 0.0001) safeStretch.y = (safeStretch.y < 0.0) ? -0.0001 : 0.0001;
+    u = (u - warp_center.x) / safeStretch.x + warp_center.x;
+    v = (v - warp_center.y) / safeStretch.y + warp_center.y;
 
     // Warping: Analytical Curl Noise vs Classic Trigonometric Approximation
-    if (u_curlNoise != 0) {
-        vec2 curl = getAnalyticalCurlNoise(pos * warpScaleInverse * 0.8, warpTime * 0.4);
-        u += warp * 0.012 * curl.x;
-        v += warp * 0.012 * curl.y;
-    } else {
-        u += warp * 0.0035 * sin(warpTime * 0.333 + warpScaleInverse * (pos.x * warpFactors.x - pos.y * warpFactors.w));
-        v += warp * 0.0035 * cos(warpTime * 0.375 - warpScaleInverse * (pos.x * warpFactors.z + pos.y * warpFactors.y));
-        u += warp * 0.0035 * cos(warpTime * 0.753 - warpScaleInverse * (pos.x * warpFactors.y - pos.y * warpFactors.z));
-        v += warp * 0.0035 * sin(warpTime * 0.825 + warpScaleInverse * (pos.x * warpFactors.x + pos.y * warpFactors.w));
+    if (abs(warp) >= 0.0001) {
+        if (u_curlNoise != 0) {
+            vec2 curl = getAnalyticalCurlNoise(pos * warpScaleInverse * 0.8, warpTime * 0.4);
+            u += warp * 0.012 * curl.x;
+            v += warp * 0.012 * curl.y;
+        } else {
+            u += warp * 0.0035 * sin(warpTime * 0.333 + warpScaleInverse * (pos.x * warpFactors.x - pos.y * warpFactors.w));
+            v += warp * 0.0035 * cos(warpTime * 0.375 - warpScaleInverse * (pos.x * warpFactors.z + pos.y * warpFactors.y));
+            u += warp * 0.0035 * cos(warpTime * 0.753 - warpScaleInverse * (pos.x * warpFactors.y - pos.y * warpFactors.z));
+            v += warp * 0.0035 * sin(warpTime * 0.825 + warpScaleInverse * (pos.x * warpFactors.x + pos.y * warpFactors.w));
+        }
     }
 
     // Rotation
-    float u2 = u - warp_center.x;
-    float v2 = v - warp_center.y;
+    if (abs(rot) >= 0.0001) {
+        float u2 = u - warp_center.x;
+        float v2 = v - warp_center.y;
 
-    float cosRotation = cos(rot);
-    float sinRotation = sin(rot);
-    u = u2 * cosRotation - v2 * sinRotation + warp_center.x;
-    v = u2 * sinRotation + v2 * cosRotation + warp_center.y;
+        float cosRotation = cos(rot);
+        float sinRotation = sin(rot);
+        u = u2 * cosRotation - v2 * sinRotation + warp_center.x;
+        v = u2 * sinRotation + v2 * cosRotation + warp_center.y;
+    }
 
     // Translation
     u -= warp_distance.x;

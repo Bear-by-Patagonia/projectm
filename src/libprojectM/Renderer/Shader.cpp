@@ -150,6 +150,11 @@ void Shader::SetUniformFloat(const char* uniform, float value) const
 void Shader::SetUniformInt(const char* uniform, int value) const
 {
     auto location = GetCachedUniformLocation(uniform);
+    SetUniformInt(location, value);
+}
+
+void Shader::SetUniformInt(GLint location, int value) const
+{
     if (location < 0)
     {
         return;
