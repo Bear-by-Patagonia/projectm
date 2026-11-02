@@ -156,6 +156,23 @@ public:
      */
     void Update(const void* data) const;
 
+    /**
+     * @brief Computes the maximum safe GL_UNPACK_ALIGNMENT (4, 2, or 1) for tightly-packed rows.
+     */
+    static constexpr auto RequiredUnpackAlignment(int width, int channels) noexcept -> int
+    {
+        const int rowBytes = width * channels;
+        if ((rowBytes & 3) == 0)
+        {
+            return 4;
+        }
+        if ((rowBytes & 1) == 0)
+        {
+            return 2;
+        }
+        return 1;
+    }
+
 private:
     /**
      * @brief Creates a new, blank texture with the given size.

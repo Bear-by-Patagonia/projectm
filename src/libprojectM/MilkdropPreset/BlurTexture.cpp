@@ -116,7 +116,7 @@ void BlurTexture::Update(const Renderer::Texture& sourceTexture, const PerFrameC
         return;
     }
 
-    AllocateTextures(sourceTexture);
+    AllocateTextures(sourceTexture, currentFbo);
 
     unsigned int const passes = static_cast<int>(m_blurLevel) * 2;
     auto const blur1EdgeDarken = static_cast<float>(*perFrameContext.blur1_edge_darken);
@@ -261,15 +261,40 @@ void BlurTexture::Update(const Renderer::Texture& sourceTexture, const PerFrameC
 
 void BlurTexture::Bind(GLint& unit, Renderer::Shader& shader) const
 {
+    static constexpr std::array<const char*, 3> kBlurSamplerNames = {
+        "sampler_blur1",
+        "sampler_blur2",
+        "sampler_blur3"};
+
     for (size_t i = 0; i < static_cast<size_t>(m_blurLevel) * 2; i++)
     {
         if (i % 2 == 1)
         {
             m_blurTextures[i]->Bind(unit, m_blurSampler);
-            shader.SetUniformInt(std::string("sampler_blur" + std::to_string(i / 2 + 1)).c_str(), unit);
+            shader.SetUniformInt(kBlurSamplerNames[i / 2], unit);
             unit++;
         }
     }
+}
+
+auto BlurTexture::SelectOptimalFormat(bool supportsR11G11B10F) noexcept -> BlurStorageFormat
+{
+    if (supportsR11G11B10F)
+    {
+        return {
+            GL_R11F_G11F_B10F,
+            GL_RGB,
+            GL_UNSIGNED_INT_10F_11F_11F_REV,
+            32,
+            true};
+    }
+
+    return {
+        GL_RGBA8,
+        GL_RGBA,
+        GL_UNSIGNED_BYTE,
+        32,
+        false};
 }
 
 void BlurTexture::GetSafeBlurMinMaxValues(const PerFrameContext& perFrameContext,
@@ -310,12 +335,13 @@ void BlurTexture::GetSafeBlurMinMaxValues(const PerFrameContext& perFrameContext
     }
 }
 
-void BlurTexture::AllocateTextures(const Renderer::Texture& sourceTexture)
+void BlurTexture::AllocateTextures(const Renderer::Texture& sourceTexture, GLuint currentFbo)
 {
     int width = sourceTexture.Width();
     int height = sourceTexture.Height();
 
     if (m_blurTextures[0] != nullptr &&
+        !m_blurTextures[0]->Empty() &&
         sourceTexture.Width() > 0 &&
         sourceTexture.Height() > 0 &&
         sourceTexture.Width() == m_sourceTextureWidth &&
@@ -325,6 +351,8 @@ void BlurTexture::AllocateTextures(const Renderer::Texture& sourceTexture)
         return;
     }
 
+    std::array<int, NumBlurTextures> widths{};
+    std::array<int, NumBlurTextures> heights{};
     for (size_t i = 0; i < m_blurTextures.size(); i++)
     {
         // main VS = 1024
@@ -339,13 +367,49 @@ void BlurTexture::AllocateTextures(const Renderer::Texture& sourceTexture)
             width = std::max(16, width / 2);
             height = std::max(16, height / 2);
         }
-        int width2 = ((width + 3) / 16) * 16;
-        int height2 = ((height + 3) / 4) * 4;
+        widths[i] = ((width + 3) / 16) * 16;
+        heights[i] = ((height + 3) / 4) * 4;
+    }
 
-        if (i == 0)
+    m_blurFramebuffer.SetSize(widths[0], heights[0]);
+
+    std::shared_ptr<Renderer::Texture> probedTex0;
+    if (!m_hasProbedR11F)
+    {
+        while (glGetError() != GL_NO_ERROR)
         {
-            // Only use as much space as needed to render the blur textures.
-            m_blurFramebuffer.SetSize(width2, height2);
+        }
+
+        const auto r11Fmt = SelectOptimalFormat(true);
+        probedTex0 = std::make_shared<Renderer::Texture>(
+            "", GL_TEXTURE_2D, widths[0], heights[0], 0,
+            r11Fmt.internalFormat, r11Fmt.format, r11Fmt.type, false);
+
+        m_blurFramebuffer.Bind(0);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, probedTex0->TextureID(), 0);
+        const bool complete = (glGetError() == GL_NO_ERROR) &&
+                              (glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+        while (glGetError() != GL_NO_ERROR)
+        {
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER, currentFbo);
+
+        m_supportsR11F = complete;
+        m_hasProbedR11F = true;
+        if (!complete)
+        {
+            probedTex0.reset();
+        }
+    }
+
+    const auto fmt = SelectOptimalFormat(m_supportsR11F);
+    for (size_t i = 0; i < m_blurTextures.size(); i++)
+    {
+        if (i == 0 && probedTex0 != nullptr)
+        {
+            m_blurTextures[0] = std::move(probedTex0);
+            continue;
         }
 
         std::string textureName;
@@ -354,8 +418,9 @@ void BlurTexture::AllocateTextures(const Renderer::Texture& sourceTexture)
             textureName = "blur" + std::to_string(i / 2 + 1);
         }
 
-        // Standard 8-bit precision texture to prevent color banding and bloom clipping
-        m_blurTextures[i] = std::make_shared<Renderer::Texture>(textureName, width2, height2, false);
+        m_blurTextures[i] = std::make_shared<Renderer::Texture>(
+            textureName, GL_TEXTURE_2D, widths[i], heights[i], 0,
+            fmt.internalFormat, fmt.format, fmt.type, false);
     }
 
     m_sourceTextureWidth = sourceTexture.Width();

@@ -129,6 +129,7 @@ auto Texture::Empty() const -> bool
 void Texture::Update(const void* data) const
 {
     glBindTexture(m_target, m_textureId);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     switch (m_target)
     {
         case GL_TEXTURE_2D:

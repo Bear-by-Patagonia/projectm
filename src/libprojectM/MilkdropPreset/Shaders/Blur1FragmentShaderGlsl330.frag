@@ -47,7 +47,7 @@ void main(){
 
     blur.xyz *= w_div;
 
-    blur.xyz = blur.xyz*fscale + fbias;
+    blur.xyz = clamp(blur.xyz * fscale + fbias, 0.0, 1.0);
 
     color.xyz = blur;
     color.w   = 1.0;

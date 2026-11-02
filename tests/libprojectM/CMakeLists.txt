@@ -33,6 +33,7 @@ add_executable(projectM-unittest
         PerPixelOptimizationTest.cpp
         PipelineOptimizationTest.cpp
         PresetFileParserTest.cpp
+        TextureFormatPrecisionTest.cpp
         WaveformAlignerTest.cpp
         ZeroFlipOrientationTest.cpp
 
