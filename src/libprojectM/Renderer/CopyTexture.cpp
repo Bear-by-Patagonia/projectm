@@ -26,6 +26,29 @@ void main() {
 )";
 
 #include <atomic>
+#include <string>
+
+static bool IsLowEndMaliGpu()
+{
+    static const bool s_isLowEndMali = []() {
+        const char* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+        if (!renderer)
+        {
+            return false;
+        }
+        std::string ren(renderer);
+        if (ren.find("Mali-G31") != std::string::npos ||
+            ren.find("Mali-G51") != std::string::npos ||
+            ren.find("Mali-G52") != std::string::npos ||
+            ren.find("Mali-4") != std::string::npos ||
+            ren.find("Mali-T") != std::string::npos)
+        {
+            return true;
+        }
+        return false;
+    }();
+    return s_isLowEndMali;
+}
 
 static std::atomic<bool> s_wideGamutEnabled{true};
 static std::atomic<bool> s_enableCatmullRomTSR{false};
@@ -125,6 +148,7 @@ uniform sampler2D texture_sampler;
 uniform int u_wide_gamut_mode;
 uniform int u_color_profile; // 0 = Natural, 1 = Vivid
 uniform int u_enable_catmull_rom;
+uniform int u_enable_low_tier_clarity;
 
 out vec4 color;
 
@@ -185,6 +209,20 @@ void main() {
     }
 
     vec3 rgb = clamp(src.rgb, 0.0, 1.0);
+
+    if (u_enable_low_tier_clarity == 1) {
+        // High-frequency adaptive contrast sharpening for budget 8-bit Mali GPUs
+        vec2 texSize = vec2(textureSize(texture_sampler, 0));
+        vec2 invTex = 1.0 / max(texSize, vec2(1.0));
+        vec3 n0 = texture(texture_sampler, presentationUV + vec2(0.0, -invTex.y)).rgb;
+        vec3 n1 = texture(texture_sampler, presentationUV + vec2(0.0,  invTex.y)).rgb;
+        vec3 n2 = texture(texture_sampler, presentationUV + vec2(-invTex.x, 0.0)).rgb;
+        vec3 n3 = texture(texture_sampler, presentationUV + vec2( invTex.x, 0.0)).rgb;
+        vec3 localMean = (n0 + n1 + n2 + n3) * 0.25;
+        vec3 delta = rgb - localMean;
+        rgb = clamp(rgb + clamp(delta * 0.35, -0.12, 0.12), 0.0, 1.0);
+    }
+
     vec3 outColor;
 
     if (u_wide_gamut_mode == 1) {
@@ -214,6 +252,14 @@ void main() {
     } else {
         // Original Vintage 2001 Mode ("Rústico"): Unmodified raw sRGB output
         outColor = rgb;
+    }
+
+    if (u_enable_low_tier_clarity == 1) {
+        // Fast temporal hash dither to eliminate 8-bit color banding on budget TV panels
+        float dither = (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) * (1.0 / 255.0);
+        float lum = dot(outColor, vec3(0.2126, 0.7152, 0.0722));
+        float blackMask = smoothstep(0.0001, 0.0010, lum);
+        outColor = clamp(outColor + dither * blackMask, 0.0, 1.0);
     }
 
     color = vec4(clamp(outColor, 0.0, 1.0), 1.0);
@@ -447,6 +493,7 @@ void CopyTexture::Copy(ShaderCache& shaderCache,
         shader->SetUniformInt("u_wide_gamut_mode", s_wideGamutEnabled.load(std::memory_order_relaxed) ? 1 : 0);
         shader->SetUniformInt("u_color_profile", s_colorProfile.load(std::memory_order_relaxed));
         shader->SetUniformInt("u_enable_catmull_rom", s_enableCatmullRomTSR.load(std::memory_order_relaxed) ? 1 : 0);
+        shader->SetUniformInt("u_enable_low_tier_clarity", IsLowEndMaliGpu() ? 1 : 0);
     }
     shader->SetUniformMat4x4("vertex_transformation", flipMatrix);
 
@@ -477,6 +524,7 @@ void CopyTexture::Copy(ShaderCache& shaderCache,
         shader->SetUniformInt("u_wide_gamut_mode", s_wideGamutEnabled.load(std::memory_order_relaxed) ? 1 : 0);
         shader->SetUniformInt("u_color_profile", s_colorProfile.load(std::memory_order_relaxed));
         shader->SetUniformInt("u_enable_catmull_rom", s_enableCatmullRomTSR.load(std::memory_order_relaxed) ? 1 : 0);
+        shader->SetUniformInt("u_enable_low_tier_clarity", IsLowEndMaliGpu() ? 1 : 0);
     }
     shader->SetUniformMat4x4("vertex_transformation", translationMatrix);
 
