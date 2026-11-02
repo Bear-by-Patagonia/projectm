@@ -108,6 +108,13 @@ void PerPixelContext::LoadPerFrameQVariables(PresetState& state, PerFrameContext
 
 void PerPixelContext::CompilePerPixelCode(const std::string& perPixelCode)
 {
+    if (perPixelCodeHandle != nullptr)
+    {
+        projectm_eval_code_destroy(perPixelCodeHandle);
+        perPixelCodeHandle = nullptr;
+    }
+    m_usage = {};
+
     if (perPixelCode.empty())
     {
         return;
@@ -133,6 +140,48 @@ void PerPixelContext::CompilePerPixelCode(const std::string& perPixelCode)
         LOG_DEBUG("[PerPixelContext] Failed per-pixel code:\n" + perPixelCode);
         throw MilkdropCompileException(error);
     }
+
+    auto queryReadOrWrite = [this](const PRJM_EVAL_F* varPtr) -> bool {
+        int r = 0;
+        int w = 0;
+        projectm_eval_code_query_variable_usage(perPixelCodeHandle, varPtr, &r, &w);
+        return (r != 0) || (w != 0);
+    };
+
+    auto queryWritten = [this](const PRJM_EVAL_F* varPtr) -> bool {
+        int w = 0;
+        projectm_eval_code_query_variable_usage(perPixelCodeHandle, varPtr, nullptr, &w);
+        return w != 0;
+    };
+
+    m_usage.readsX = queryReadOrWrite(x);
+    m_usage.readsY = queryReadOrWrite(y);
+    m_usage.readsRad = queryReadOrWrite(rad);
+    m_usage.readsAng = queryReadOrWrite(ang);
+
+    m_usage.writesZoom = queryWritten(zoom);
+    m_usage.writesZoomExp = queryWritten(zoomexp);
+    m_usage.writesRot = queryWritten(rot);
+    m_usage.writesWarp = queryWritten(warp);
+    m_usage.writesCx = queryWritten(cx);
+    m_usage.writesCy = queryWritten(cy);
+    m_usage.writesDx = queryWritten(dx);
+    m_usage.writesDy = queryWritten(dy);
+    m_usage.writesSx = queryWritten(sx);
+    m_usage.writesSy = queryWritten(sy);
+
+    const PRJM_EVAL_F* allowedPerVertexVars[10] = {
+        zoom, zoomexp, rot, warp, cx, cy, dx, dy, sx, sy
+    };
+    const bool onlyAllowedWrites =
+        projectm_eval_code_has_only_allowed_writes(perPixelCodeHandle, allowedPerVertexVars, 10) != 0;
+
+    m_usage.isSpatiallyInvariant =
+        onlyAllowedWrites &&
+        !m_usage.readsX &&
+        !m_usage.readsY &&
+        !m_usage.readsRad &&
+        !m_usage.readsAng;
 }
 
 void PerPixelContext::ExecutePerPixelCode()

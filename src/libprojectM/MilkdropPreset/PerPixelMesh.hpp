@@ -56,8 +56,6 @@ public:
      */
     auto WarpShaderUsesDiscard() const -> bool;
 
-
-private:
     /**
      * Vertex attributes for radius and angle.
      */
@@ -85,6 +83,53 @@ private:
             glVertexAttribPointer(attributeIndex, sizeof(ZoomRotWarp) / sizeof(float), GL_FLOAT, GL_FALSE, sizeof(ZoomRotWarp), nullptr);
         }
     };
+
+    struct DirtyBuffers
+    {
+        bool zoomRotWarp{false};
+        bool center{false};
+        bool distance{false};
+        bool stretch{false};
+    };
+
+    struct GridCacheState
+    {
+        bool hasCachedZoomRotWarp{false};
+        bool hasCachedCenter{false};
+        bool hasCachedDistance{false};
+        bool hasCachedStretch{false};
+        int cachedTotalVertices{0};
+        float cachedZoom{0.0f};
+        float cachedZoomExp{0.0f};
+        float cachedRot{0.0f};
+        float cachedWarp{0.0f};
+        float cachedCx{0.0f};
+        float cachedCy{0.0f};
+        float cachedDx{0.0f};
+        float cachedDy{0.0f};
+        float cachedSx{0.0f};
+        float cachedSy{0.0f};
+        size_t lastEvalCount{0};
+    };
+
+    /**
+     * @brief Pure-CPU warp mesh evaluation (Humble Object core) supporting spatial-invariance fast-path
+     *        and per-attribute VBO dirty tracking without requiring an OpenGL context.
+     */
+    static auto EvaluateGridCPU(int gridSizeX,
+                                int gridSizeY,
+                                float fps,
+                                const Renderer::Point* vertices,
+                                const RadiusAngle* radiusAngles,
+                                const PerFrameContext& perFrameContext,
+                                PerPixelContext& perPixelContext,
+                                ZoomRotWarp* outZoomRotWarp,
+                                Renderer::Point* outCenter,
+                                Renderer::Point* outDistance,
+                                Renderer::Point* outStretch,
+                                GridCacheState& cache) -> DirtyBuffers;
+
+private:
 
     /**
      * @brief Initializes the vertex array and fills in static data if needed.
@@ -137,19 +182,8 @@ private:
     std::unique_ptr<MilkdropShader> m_warpShader;                     //!< The warp shader. Either preset-defined or a default shader.
     Renderer::Sampler m_perPixelSampler{GL_CLAMP_TO_EDGE, GL_LINEAR}; //!< The main texture sampler.
 
-    bool m_hasCachedUniforms{false};
     bool m_cachedModernMode{true};
-    int m_cachedTotalVertices{0};
-    float m_cachedZoom{0.0f};
-    float m_cachedZoomExp{0.0f};
-    float m_cachedRot{0.0f};
-    float m_cachedWarp{0.0f};
-    float m_cachedCx{0.0f};
-    float m_cachedCy{0.0f};
-    float m_cachedDx{0.0f};
-    float m_cachedDy{0.0f};
-    float m_cachedSx{0.0f};
-    float m_cachedSy{0.0f};
+    GridCacheState m_gridCache{};
 };
 
 } // namespace MilkdropPreset

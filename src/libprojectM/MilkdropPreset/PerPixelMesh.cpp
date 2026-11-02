@@ -141,7 +141,7 @@ void PerPixelMesh::InitializeMesh(const PresetState& presetState)
         m_stretchBuffer.Resize(vertexCount);
 
         m_warpMesh.Indices().Resize(m_gridSizeX * m_gridSizeY * 6);
-        m_hasCachedUniforms = false;
+        m_gridCache = {};
     }
     else if (m_viewportWidth == presetState.renderContext.viewportSizeX &&
              m_viewportHeight == presetState.renderContext.viewportSizeY &&
@@ -237,117 +237,130 @@ void PerPixelMesh::InitializeMesh(const PresetState& presetState)
 
 
 
-void PerPixelMesh::CalculateMesh(const PresetState& presetState, const PerFrameContext& perFrameContext, PerPixelContext& perPixelContext)
+auto PerPixelMesh::EvaluateGridCPU(int gridSizeX,
+                                   int gridSizeY,
+                                   float fps,
+                                   const Renderer::Point* vertices,
+                                   const RadiusAngle* radiusAngles,
+                                   const PerFrameContext& perFrameContext,
+                                   PerPixelContext& perPixelContext,
+                                   ZoomRotWarp* outZoomRotWarp,
+                                   Renderer::Point* outCenter,
+                                   Renderer::Point* outDistance,
+                                   Renderer::Point* outStretch,
+                                   GridCacheState& cache) -> DirtyBuffers
 {
-    float zoom = static_cast<float>(*perFrameContext.zoom);
-    float zoomExp = static_cast<float>(*perFrameContext.zoomexp);
-    float rot = static_cast<float>(*perFrameContext.rot);
-    float warp = static_cast<float>(*perFrameContext.warp);
-    float cx = static_cast<float>(*perFrameContext.cx);
-    float cy = static_cast<float>(*perFrameContext.cy);
-    float dx = static_cast<float>(*perFrameContext.dx);
-    float dy = static_cast<float>(*perFrameContext.dy);
-    float sx = static_cast<float>(*perFrameContext.sx);
-    float sy = static_cast<float>(*perFrameContext.sy);
+    const int totalVertices = (gridSizeX + 1) * (gridSizeY + 1);
+    if (totalVertices <= 0)
+    {
+        cache.lastEvalCount = 0;
+        return {};
+    }
 
     // Time-step kinematic independence (anti-"Pac-Man Turbo" protection):
-    // When running above or below 60 FPS (e.g. 90Hz/120Hz displays, or heavy 4K shaders),
-    // normalize per-frame iterative advection steps so angular, linear, and exponential
-    // velocities per real-world second remain strictly constant.
-    const float currentFps = presetState.renderContext.fps;
-    const float kappa = (currentFps > 5.0f) ? std::clamp(60.0f / currentFps, 0.40f, 2.50f) : 1.0f;
+    // Normalize per-frame iterative advection steps so angular, linear, and exponential
+    // velocities per real-world second remain strictly constant across 30Hz..120Hz displays.
+    const float kappa = (fps > 5.0f) ? std::clamp(60.0f / fps, 0.40f, 2.50f) : 1.0f;
     const bool applyTimeScale = (std::abs(kappa - 1.0f) > 0.03f);
+
+    if (cache.cachedTotalVertices != totalVertices)
+    {
+        cache.hasCachedZoomRotWarp = false;
+        cache.hasCachedCenter = false;
+        cache.hasCachedDistance = false;
+        cache.hasCachedStretch = false;
+        cache.cachedTotalVertices = totalVertices;
+    }
+
+    auto broadcastUniforms = [&](float z, float ze, float r, float w,
+                                 float cx, float cy,
+                                 float dx, float dy,
+                                 float sx, float sy) -> DirtyBuffers {
+        DirtyBuffers dirty{};
+        if (!cache.hasCachedZoomRotWarp ||
+            cache.cachedZoom != z ||
+            cache.cachedZoomExp != ze ||
+            cache.cachedRot != r ||
+            cache.cachedWarp != w)
+        {
+            std::fill_n(outZoomRotWarp, totalVertices, ZoomRotWarp{z, ze, r, w});
+            cache.cachedZoom = z;
+            cache.cachedZoomExp = ze;
+            cache.cachedRot = r;
+            cache.cachedWarp = w;
+            cache.hasCachedZoomRotWarp = true;
+            dirty.zoomRotWarp = true;
+        }
+        if (!cache.hasCachedCenter || cache.cachedCx != cx || cache.cachedCy != cy)
+        {
+            std::fill_n(outCenter, totalVertices, Renderer::Point{cx, cy});
+            cache.cachedCx = cx;
+            cache.cachedCy = cy;
+            cache.hasCachedCenter = true;
+            dirty.center = true;
+        }
+        if (!cache.hasCachedDistance || cache.cachedDx != dx || cache.cachedDy != dy)
+        {
+            std::fill_n(outDistance, totalVertices, Renderer::Point{dx, dy});
+            cache.cachedDx = dx;
+            cache.cachedDy = dy;
+            cache.hasCachedDistance = true;
+            dirty.distance = true;
+        }
+        if (!cache.hasCachedStretch || cache.cachedSx != sx || cache.cachedSy != sy)
+        {
+            std::fill_n(outStretch, totalVertices, Renderer::Point{sx, sy});
+            cache.cachedSx = sx;
+            cache.cachedSy = sy;
+            cache.hasCachedStretch = true;
+            dirty.stretch = true;
+        }
+        return dirty;
+    };
+
+    const PRJM_EVAL_F baseZoom = *perFrameContext.zoom;
+    const PRJM_EVAL_F baseZoomExp = *perFrameContext.zoomexp;
+    const PRJM_EVAL_F baseRot = *perFrameContext.rot;
+    const PRJM_EVAL_F baseWarp = *perFrameContext.warp;
+    const PRJM_EVAL_F baseCx = *perFrameContext.cx;
+    const PRJM_EVAL_F baseCy = *perFrameContext.cy;
+    const PRJM_EVAL_F baseDx = *perFrameContext.dx;
+    const PRJM_EVAL_F baseDy = *perFrameContext.dy;
+    const PRJM_EVAL_F baseSx = *perFrameContext.sx;
+    const PRJM_EVAL_F baseSy = *perFrameContext.sy;
+
+    float uZoom = static_cast<float>(baseZoom);
+    const float uZoomExp = static_cast<float>(baseZoomExp);
+    float uRot = static_cast<float>(baseRot);
+    float uWarp = static_cast<float>(baseWarp);
+    const float uCx = static_cast<float>(baseCx);
+    const float uCy = static_cast<float>(baseCy);
+    float uDx = static_cast<float>(baseDx);
+    float uDy = static_cast<float>(baseDy);
+    float uSx = static_cast<float>(baseSx);
+    float uSy = static_cast<float>(baseSy);
 
     if (applyTimeScale)
     {
-        if (zoom > 0.001f) zoom = std::pow(zoom, kappa);
-        rot *= kappa;
-        warp *= kappa;
-        dx *= kappa;
-        dy *= kappa;
-        if (sx > 0.001f) sx = std::pow(sx, kappa);
-        if (sy > 0.001f) sy = std::pow(sy, kappa);
+        if (uZoom > 0.001f) uZoom = std::pow(uZoom, kappa);
+        uRot *= kappa;
+        uWarp *= kappa;
+        uDx *= kappa;
+        uDy *= kappa;
+        if (uSx > 0.001f) uSx = std::pow(uSx, kappa);
+        if (uSy > 0.001f) uSy = std::pow(uSy, kappa);
     }
 
-    int totalVertices = (m_gridSizeY + 1) * (m_gridSizeX + 1);
-
+    // Fast Path 1: No per_pixel equations present in preset.
     if (!perPixelContext.perPixelCodeHandle)
     {
-        if (m_hasCachedUniforms &&
-            m_cachedTotalVertices == totalVertices &&
-            m_cachedZoom == zoom &&
-            m_cachedZoomExp == zoomExp &&
-            m_cachedRot == rot &&
-            m_cachedWarp == warp &&
-            m_cachedCx == cx &&
-            m_cachedCy == cy &&
-            m_cachedDx == dx &&
-            m_cachedDy == dy &&
-            m_cachedSx == sx &&
-            m_cachedSy == sy)
-        {
-            return;
-        }
-
-        // Broadcast uniform per-frame values directly into VBOs.
-        // Avoids VAO attribute toggling bugs that leak into custom shapes / 3D objects.
-        ZoomRotWarp zrw{zoom, zoomExp, rot, warp};
-        Renderer::Point center{cx, cy};
-        Renderer::Point dist{dx, dy};
-        Renderer::Point stretch{sx, sy};
-
-        std::fill(m_zoomRotWarpBuffer.Get().begin(), m_zoomRotWarpBuffer.Get().end(), zrw);
-        std::fill(m_centerBuffer.Get().begin(), m_centerBuffer.Get().end(), center);
-        std::fill(m_distanceBuffer.Get().begin(), m_distanceBuffer.Get().end(), dist);
-        std::fill(m_stretchBuffer.Get().begin(), m_stretchBuffer.Get().end(), stretch);
-
-        m_zoomRotWarpBuffer.Update();
-        m_centerBuffer.Update();
-        m_distanceBuffer.Update();
-        m_stretchBuffer.Update();
-
-        m_hasCachedUniforms = true;
-        m_cachedTotalVertices = totalVertices;
-        m_cachedZoom = zoom;
-        m_cachedZoomExp = zoomExp;
-        m_cachedRot = rot;
-        m_cachedWarp = warp;
-        m_cachedCx = cx;
-        m_cachedCy = cy;
-        m_cachedDx = dx;
-        m_cachedDy = dy;
-        m_cachedSx = sx;
-        m_cachedSy = sy;
-        return;
+        cache.lastEvalCount = 0;
+        return broadcastUniforms(uZoom, uZoomExp, uRot, uWarp, uCx, uCy, uDx, uDy, uSx, uSy);
     }
 
-    m_hasCachedUniforms = false;
-    auto& vertices = m_warpMesh.Vertices();
-
-    const double baseZoom = *perFrameContext.zoom;
-    const double baseZoomExp = *perFrameContext.zoomexp;
-    const double baseRot = *perFrameContext.rot;
-    const double baseWarp = *perFrameContext.warp;
-    const double baseCx = *perFrameContext.cx;
-    const double baseCy = *perFrameContext.cy;
-    const double baseDx = *perFrameContext.dx;
-    const double baseDy = *perFrameContext.dy;
-    const double baseSx = *perFrameContext.sx;
-    const double baseSy = *perFrameContext.sy;
-
-    for (int vertex = 0; vertex < totalVertices; ++vertex)
+    // Fast Path 2: Spatially-invariant per_pixel equations (1x/frame evaluation instead of 3,185x/frame).
+    if (perPixelContext.IsSpatiallyInvariant())
     {
-        auto& curVertex = vertices[vertex];
-        auto& curRadiusAngle = m_radiusAngleBuffer[vertex];
-        auto& curZoomRotWarp = m_zoomRotWarpBuffer[vertex];
-        auto& curCenter = m_centerBuffer[vertex];
-        auto& curDistance = m_distanceBuffer[vertex];
-        auto& curStretch = m_stretchBuffer[vertex];
-
-        *perPixelContext.x = static_cast<double>(curVertex.X() * 0.5f + 0.5f);
-        *perPixelContext.y = static_cast<double>(curVertex.Y() * 0.5f + 0.5f);
-        *perPixelContext.rad = static_cast<double>(curRadiusAngle.radius);
-        *perPixelContext.ang = static_cast<double>(-curRadiusAngle.angle);
         *perPixelContext.zoom = baseZoom;
         *perPixelContext.zoomexp = baseZoomExp;
         *perPixelContext.rot = baseRot;
@@ -360,68 +373,294 @@ void PerPixelMesh::CalculateMesh(const PresetState& presetState, const PerFrameC
         *perPixelContext.sy = baseSy;
 
         perPixelContext.ExecutePerPixelCode();
+        cache.lastEvalCount = 1;
 
-        float vZoom = static_cast<float>(*perPixelContext.zoom);
-        float vZoomExp = static_cast<float>(*perPixelContext.zoomexp);
-        float vRot = static_cast<float>(*perPixelContext.rot);
-        float vWarp = static_cast<float>(*perPixelContext.warp);
-        float vDx = static_cast<float>(*perPixelContext.dx);
-        float vDy = static_cast<float>(*perPixelContext.dy);
-        float vSx = static_cast<float>(*perPixelContext.sx);
-        float vSy = static_cast<float>(*perPixelContext.sy);
+        float z = static_cast<float>(*perPixelContext.zoom);
+        const float ze = static_cast<float>(*perPixelContext.zoomexp);
+        float r = static_cast<float>(*perPixelContext.rot);
+        float w = static_cast<float>(*perPixelContext.warp);
+        const float cx = static_cast<float>(*perPixelContext.cx);
+        const float cy = static_cast<float>(*perPixelContext.cy);
+        float dx = static_cast<float>(*perPixelContext.dx);
+        float dy = static_cast<float>(*perPixelContext.dy);
+        float sx = static_cast<float>(*perPixelContext.sx);
+        float sy = static_cast<float>(*perPixelContext.sy);
 
         if (applyTimeScale)
         {
-            if (vZoom > 0.001f) vZoom = std::pow(vZoom, kappa);
-            vRot *= kappa;
-            vWarp *= kappa;
-            vDx *= kappa;
-            vDy *= kappa;
-            if (vSx > 0.001f) vSx = std::pow(vSx, kappa);
-            if (vSy > 0.001f) vSy = std::pow(vSy, kappa);
+            if (z > 0.001f) z = std::pow(z, kappa);
+            r *= kappa;
+            w *= kappa;
+            dx *= kappa;
+            dy *= kappa;
+            if (sx > 0.001f) sx = std::pow(sx, kappa);
+            if (sy > 0.001f) sy = std::pow(sy, kappa);
         }
 
-        curZoomRotWarp.zoom = vZoom;
-        curZoomRotWarp.zoomExp = vZoomExp;
-        curZoomRotWarp.rot = vRot;
-        curZoomRotWarp.warp = vWarp;
-        curCenter = {static_cast<float>(*perPixelContext.cx), static_cast<float>(*perPixelContext.cy)};
-        curDistance = {vDx, vDy};
-        curStretch = {vSx, vSy};
+        return broadcastUniforms(z, ze, r, w, cx, cy, dx, dy, sx, sy);
     }
 
-    // Phase unwrapping & mesh seam smoothing:
-    // Across the polar branch cut (y = 0, x < 0), angle jumps by 2*pi.
-    // If a preset formula multiplies or adds 'ang' to 'rot', adjacent vertices
-    // across the horizontal seam differ by > pi. In GPU hardware interpolation,
-    // this causes an inverted 360-degree polygon flip and visual screen tear.
-    // Unwrapping the phase ensures shortest-arc interpolation, completely eliminating
-    // the horizontal seam jump while preserving exact rotation angles.
-    int const midY = m_gridSizeY / 2;
-    int const midX = m_gridSizeX / 2;
-    if (midY > 0)
+    // Path 3: Spatially-varying per-vertex execution with minimal register resets & per-VBO dirty tracking.
+    cache.lastEvalCount = static_cast<size_t>(totalVertices);
+    const auto& u = perPixelContext.Usage();
+
+    const bool mutZRW = u.writesZoom || u.writesZoomExp || u.writesRot || u.writesWarp;
+    const bool mutCenter = u.writesCx || u.writesCy;
+    const bool mutDist = u.writesDx || u.writesDy;
+    const bool mutStretch = u.writesSx || u.writesSy;
+
+    DirtyBuffers dirty{};
+    if (mutZRW)
+    {
+        cache.hasCachedZoomRotWarp = false;
+        dirty.zoomRotWarp = true;
+    }
+    else if (!cache.hasCachedZoomRotWarp ||
+             cache.cachedZoom != uZoom ||
+             cache.cachedZoomExp != uZoomExp ||
+             cache.cachedRot != uRot ||
+             cache.cachedWarp != uWarp)
+    {
+        std::fill_n(outZoomRotWarp, totalVertices, ZoomRotWarp{uZoom, uZoomExp, uRot, uWarp});
+        cache.cachedZoom = uZoom;
+        cache.cachedZoomExp = uZoomExp;
+        cache.cachedRot = uRot;
+        cache.cachedWarp = uWarp;
+        cache.hasCachedZoomRotWarp = true;
+        dirty.zoomRotWarp = true;
+    }
+
+    if (mutCenter)
+    {
+        cache.hasCachedCenter = false;
+        dirty.center = true;
+    }
+    else if (!cache.hasCachedCenter || cache.cachedCx != uCx || cache.cachedCy != uCy)
+    {
+        std::fill_n(outCenter, totalVertices, Renderer::Point{uCx, uCy});
+        cache.cachedCx = uCx;
+        cache.cachedCy = uCy;
+        cache.hasCachedCenter = true;
+        dirty.center = true;
+    }
+
+    if (mutDist)
+    {
+        cache.hasCachedDistance = false;
+        dirty.distance = true;
+    }
+    else if (!cache.hasCachedDistance || cache.cachedDx != uDx || cache.cachedDy != uDy)
+    {
+        std::fill_n(outDistance, totalVertices, Renderer::Point{uDx, uDy});
+        cache.cachedDx = uDx;
+        cache.cachedDy = uDy;
+        cache.hasCachedDistance = true;
+        dirty.distance = true;
+    }
+
+    if (mutStretch)
+    {
+        cache.hasCachedStretch = false;
+        dirty.stretch = true;
+    }
+    else if (!cache.hasCachedStretch || cache.cachedSx != uSx || cache.cachedSy != uSy)
+    {
+        std::fill_n(outStretch, totalVertices, Renderer::Point{uSx, uSy});
+        cache.cachedSx = uSx;
+        cache.cachedSy = uSy;
+        cache.hasCachedStretch = true;
+        dirty.stretch = true;
+    }
+
+    // Seed all 10 per-vertex variables once per frame so read-only references see current per-frame values.
+    *perPixelContext.zoom = baseZoom;
+    *perPixelContext.zoomexp = baseZoomExp;
+    *perPixelContext.rot = baseRot;
+    *perPixelContext.warp = baseWarp;
+    *perPixelContext.cx = baseCx;
+    *perPixelContext.cy = baseCy;
+    *perPixelContext.dx = baseDx;
+    *perPixelContext.dy = baseDy;
+    *perPixelContext.sx = baseSx;
+    *perPixelContext.sy = baseSy;
+
+    for (int vertex = 0; vertex < totalVertices; ++vertex)
+    {
+        if (u.readsX)
+        {
+            *perPixelContext.x = static_cast<PRJM_EVAL_F>(vertices[vertex].X() * 0.5f + 0.5f);
+        }
+        if (u.readsY)
+        {
+            *perPixelContext.y = static_cast<PRJM_EVAL_F>(vertices[vertex].Y() * 0.5f + 0.5f);
+        }
+        if (u.readsRad)
+        {
+            *perPixelContext.rad = static_cast<PRJM_EVAL_F>(radiusAngles[vertex].radius);
+        }
+        if (u.readsAng)
+        {
+            *perPixelContext.ang = static_cast<PRJM_EVAL_F>(-radiusAngles[vertex].angle);
+        }
+
+        if (u.writesZoom) *perPixelContext.zoom = baseZoom;
+        if (u.writesZoomExp) *perPixelContext.zoomexp = baseZoomExp;
+        if (u.writesRot) *perPixelContext.rot = baseRot;
+        if (u.writesWarp) *perPixelContext.warp = baseWarp;
+        if (u.writesCx) *perPixelContext.cx = baseCx;
+        if (u.writesCy) *perPixelContext.cy = baseCy;
+        if (u.writesDx) *perPixelContext.dx = baseDx;
+        if (u.writesDy) *perPixelContext.dy = baseDy;
+        if (u.writesSx) *perPixelContext.sx = baseSx;
+        if (u.writesSy) *perPixelContext.sy = baseSy;
+
+        perPixelContext.ExecutePerPixelCode();
+
+        if (mutZRW)
+        {
+            float vZoom = uZoom;
+            if (u.writesZoom)
+            {
+                vZoom = static_cast<float>(*perPixelContext.zoom);
+                if (applyTimeScale && vZoom > 0.001f)
+                {
+                    vZoom = std::pow(vZoom, kappa);
+                }
+            }
+            const float vZoomExp = u.writesZoomExp ? static_cast<float>(*perPixelContext.zoomexp) : uZoomExp;
+            float vRot = uRot;
+            if (u.writesRot)
+            {
+                vRot = static_cast<float>(*perPixelContext.rot);
+                if (applyTimeScale)
+                {
+                    vRot *= kappa;
+                }
+            }
+            float vWarp = uWarp;
+            if (u.writesWarp)
+            {
+                vWarp = static_cast<float>(*perPixelContext.warp);
+                if (applyTimeScale)
+                {
+                    vWarp *= kappa;
+                }
+            }
+            outZoomRotWarp[vertex] = {vZoom, vZoomExp, vRot, vWarp};
+        }
+
+        if (mutCenter)
+        {
+            outCenter[vertex] = {
+                static_cast<float>(*perPixelContext.cx),
+                static_cast<float>(*perPixelContext.cy)
+            };
+        }
+
+        if (mutDist)
+        {
+            float vDx = uDx;
+            if (u.writesDx)
+            {
+                vDx = static_cast<float>(*perPixelContext.dx);
+                if (applyTimeScale)
+                {
+                    vDx *= kappa;
+                }
+            }
+            float vDy = uDy;
+            if (u.writesDy)
+            {
+                vDy = static_cast<float>(*perPixelContext.dy);
+                if (applyTimeScale)
+                {
+                    vDy *= kappa;
+                }
+            }
+            outDistance[vertex] = {vDx, vDy};
+        }
+
+        if (mutStretch)
+        {
+            float vSx = uSx;
+            if (u.writesSx)
+            {
+                vSx = static_cast<float>(*perPixelContext.sx);
+                if (applyTimeScale && vSx > 0.001f)
+                {
+                    vSx = std::pow(vSx, kappa);
+                }
+            }
+            float vSy = uSy;
+            if (u.writesSy)
+            {
+                vSy = static_cast<float>(*perPixelContext.sy);
+                if (applyTimeScale && vSy > 0.001f)
+                {
+                    vSy = std::pow(vSy, kappa);
+                }
+            }
+            outStretch[vertex] = {vSx, vSy};
+        }
+    }
+
+    // Phase unwrapping & mesh seam smoothing across the polar branch cut (y = 0, x < 0).
+    const int midY = gridSizeY / 2;
+    const int midX = gridSizeX / 2;
+    if (u.writesRot && midY > 0)
     {
         for (int gx = 0; gx < midX; ++gx)
         {
-            int const upperIdx = gx + midY * (m_gridSizeX + 1);
-            int const lowerIdx = gx + (midY - 1) * (m_gridSizeX + 1);
+            const int upperIdx = gx + midY * (gridSizeX + 1);
+            const int lowerIdx = gx + (midY - 1) * (gridSizeX + 1);
 
-            float const diffRot = m_zoomRotWarpBuffer[upperIdx].rot - m_zoomRotWarpBuffer[lowerIdx].rot;
+            const float diffRot = outZoomRotWarp[upperIdx].rot - outZoomRotWarp[lowerIdx].rot;
             if (diffRot > 3.14159265f)
             {
-                m_zoomRotWarpBuffer[upperIdx].rot -= 6.2831853f;
+                outZoomRotWarp[upperIdx].rot -= 6.2831853f;
             }
             else if (diffRot < -3.14159265f)
             {
-                m_zoomRotWarpBuffer[upperIdx].rot += 6.2831853f;
+                outZoomRotWarp[upperIdx].rot += 6.2831853f;
             }
         }
     }
 
-    m_zoomRotWarpBuffer.Update();
-    m_centerBuffer.Update();
-    m_distanceBuffer.Update();
-    m_stretchBuffer.Update();
+    return dirty;
+}
+
+void PerPixelMesh::CalculateMesh(const PresetState& presetState, const PerFrameContext& perFrameContext, PerPixelContext& perPixelContext)
+{
+    DirtyBuffers const dirty = EvaluateGridCPU(
+        m_gridSizeX,
+        m_gridSizeY,
+        presetState.renderContext.fps,
+        m_warpMesh.Vertices().Get().data(),
+        m_radiusAngleBuffer.Get().data(),
+        perFrameContext,
+        perPixelContext,
+        m_zoomRotWarpBuffer.Get().data(),
+        m_centerBuffer.Get().data(),
+        m_distanceBuffer.Get().data(),
+        m_stretchBuffer.Get().data(),
+        m_gridCache);
+
+    if (dirty.zoomRotWarp)
+    {
+        m_zoomRotWarpBuffer.Update();
+    }
+    if (dirty.center)
+    {
+        m_centerBuffer.Update();
+    }
+    if (dirty.distance)
+    {
+        m_distanceBuffer.Update();
+    }
+    if (dirty.stretch)
+    {
+        m_stretchBuffer.Update();
+    }
 }
 
 void PerPixelMesh::WarpedBlit(const PresetState& presetState,

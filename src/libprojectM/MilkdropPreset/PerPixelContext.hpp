@@ -58,8 +58,38 @@ public:
      */
     void ExecutePerPixelCode();
 
+    struct VariableUsage
+    {
+        bool readsX{true};
+        bool readsY{true};
+        bool readsRad{true};
+        bool readsAng{true};
+        bool writesZoom{true};
+        bool writesZoomExp{true};
+        bool writesRot{true};
+        bool writesWarp{true};
+        bool writesCx{true};
+        bool writesCy{true};
+        bool writesDx{true};
+        bool writesDy{true};
+        bool writesSx{true};
+        bool writesSy{true};
+        bool isSpatiallyInvariant{false};
+    };
+
+    auto Usage() const -> const VariableUsage&
+    {
+        return m_usage;
+    }
+
+    auto IsSpatiallyInvariant() const -> bool
+    {
+        return m_usage.isSpatiallyInvariant;
+    }
+
     projectm_eval_context* perPixelCodeContext{nullptr}; //!< The code runtime context, holds memory buffers and variables.
     projectm_eval_code* perPixelCodeHandle{nullptr};     //!< The compiled per-pixel code handle.
+    VariableUsage m_usage{};
 
     PRJM_EVAL_F* zoom{};
     PRJM_EVAL_F* zoomexp{};
