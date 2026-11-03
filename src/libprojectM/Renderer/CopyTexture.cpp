@@ -203,95 +203,18 @@ vec4 sampleCatmullRom(sampler2D tex, vec2 uv, vec2 texSize) {
 }
 
 void main() {
-    // Exact 1:1 presentation coordinate mapping (no crop / overscan distortion)
-    vec2 presentationUV = fragment_tex_coord;
+    vec3 rgb = texture(texture_sampler, fragment_tex_coord).rgb;
 
-    vec4 src;
-    if (u_enable_catmull_rom == 1) {
-        vec2 srcTexSize = vec2(textureSize(texture_sampler, 0));
-        if (srcTexSize.x > 64.0 && (srcTexSize.x < 1900.0 || srcTexSize.y < 1050.0)) {
-            src = sampleCatmullRom(texture_sampler, presentationUV, srcTexSize);
-        } else {
-            src = texture(texture_sampler, presentationUV);
-        }
-    } else {
-        src = texture(texture_sampler, presentationUV);
-    }
+    // High quality ACES tonemapping and color enhancement
+    vec3 lin = pow(max(rgb, vec3(0.0)), vec3(2.2));
+    lin = clamp((lin * (2.51 * lin + 0.03)) / (lin * (2.43 * lin + 0.59) + 0.14), 0.0, 1.0);
 
-    vec3 rgb = clamp(src.rgb, 0.0, 1.0);
+    float lum = dot(lin, vec3(0.2126, 0.7152, 0.0722));
+    float vibrance = 1.0 + 0.20 * sin(clamp(lum, 0.0, 1.0) * 3.14159265);
+    lin = clamp(mix(vec3(lum), lin, vibrance), 0.0, 1.0);
 
-    if (u_enable_low_tier_clarity == 1) {
-        // High-frequency adaptive contrast sharpening for budget 8-bit Mali GPUs
-        vec2 texSize = vec2(textureSize(texture_sampler, 0));
-        vec2 invTex = 1.0 / max(texSize, vec2(1.0));
-        vec3 n0 = texture(texture_sampler, presentationUV + vec2(0.0, -invTex.y)).rgb;
-        vec3 n1 = texture(texture_sampler, presentationUV + vec2(0.0,  invTex.y)).rgb;
-        vec3 n2 = texture(texture_sampler, presentationUV + vec2(-invTex.x, 0.0)).rgb;
-        vec3 n3 = texture(texture_sampler, presentationUV + vec2( invTex.x, 0.0)).rgb;
-        vec3 localMean = (n0 + n1 + n2 + n3) * 0.25;
-        vec3 delta = rgb - localMean;
-        rgb = clamp(rgb + clamp(delta * 0.35, -0.12, 0.12), 0.0, 1.0);
-    }
-
-    vec3 outColor;
-
-    if (u_wide_gamut_mode == 1) {
-        vec3 linColor = sRGBToLinear(rgb);
-
-        vec3 finalLinear = linColor;
-        if (u_color_profile == 1) {
-            // Vivid Mode: Rich contrast and clean vibrant colors without highlight bleaching
-            float lum = dot(linColor, vec3(0.2126, 0.7152, 0.0722));
-            finalLinear = mix(vec3(lum), linColor, 1.15); // Pure 15% chromatic saturation pop
-        }
-
-        finalLinear = clamp(finalLinear, 0.0, 1.0);
-
-        if (u_enable_low_tier_clarity == 1) {
-            // 1. Film-grade ACES Tonemapping: Prevents highlight bleaching and preserves rich rolloff
-            finalLinear = ACESFilm(finalLinear * 1.08);
-
-            // 2. Luma-Weighted Vibrance: Enhances color saturation in midtones without crushing shadows or blowing highlights
-            float lumMid = dot(finalLinear, vec3(0.2126, 0.7152, 0.0722));
-            float vibranceFactor = 1.0 + 0.22 * sin(clamp(lumMid, 0.0, 1.0) * 3.14159265);
-            finalLinear = clamp(mix(vec3(lumMid), finalLinear, vibranceFactor), 0.0, 1.0);
-
-            // 3. Faux-HDR Specular Bloom Kick: Emulates 1000-nit OLED / Mini-LED micro-contrast on 8-bit pipeline
-            float specKick = max(0.0, lumMid - 0.70);
-            finalLinear = clamp(finalLinear + finalLinear * (specKick * specKick * 1.8), 0.0, 1.0);
-        }
-
-        outColor = linearToSRGB(finalLinear);
-
-        // Unified 0-Nit True Black Hermite Gate:
-        float lum = dot(outColor, vec3(0.2126, 0.7152, 0.0722));
-        float finalBlackGate = smoothstep(0.0001, 0.0010, lum);
-        outColor *= finalBlackGate;
-
-        // Edge Dissolve: 2-pixel hermite falloff at the outer bezel boundary
-        float edgeDist = min(min(fragment_tex_coord.x, 1.0 - fragment_tex_coord.x),
-                             min(fragment_tex_coord.y, 1.0 - fragment_tex_coord.y));
-        if (edgeDist < 0.0025) {
-            outColor *= smoothstep(0.0, 0.0025, edgeDist);
-        }
-    } else {
-        // Original Vintage 2001 Mode ("Rústico"): Unmodified raw sRGB output
-        outColor = rgb;
-    }
-
-    if (u_enable_low_tier_clarity == 1) {
-        // 4. Triangular Probability Density Function (TPDF) Dithering:
-        // Generates completely liquid, imperceptible 10-bit transitions on OLED / Mini-LED panels
-        vec2 p = gl_FragCoord.xy;
-        float r1 = fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
-        float r2 = fract(sin(dot(p + vec2(1.23, 4.56), vec2(39.346, 11.135))) * 23421.631);
-        float tpdfDither = (r1 + r2 - 1.0) * (1.0 / 255.0);
-        float lum = dot(outColor, vec3(0.2126, 0.7152, 0.0722));
-        float blackMask = smoothstep(0.0001, 0.0010, lum);
-        outColor = clamp(outColor + tpdfDither * blackMask, 0.0, 1.0);
-    }
-
-    color = vec4(clamp(outColor, 0.0, 1.0), 1.0);
+    vec3 srgb = pow(lin, vec3(1.0 / 2.2));
+    color = vec4(clamp(srgb, 0.0, 1.0), 1.0);
 }
 )";
 
