@@ -634,7 +634,19 @@ void PS(float4 _vDiffuse : COLOR,
         }
     }
 
-    std::string returnCode = "_return_value = float4(saturate(ret.xyz), 1.0);\n}\n";
+    std::string returnCode;
+    if (m_type == ShaderType::CompositeShader)
+    {
+        returnCode = "\n    float _maxC = max(ret.x, max(ret.y, ret.z));\n"
+                     "    if (_maxC > 1.25) {\n"
+                     "        ret = ret / _maxC * (1.0 + 0.8 * (1.0 - exp(-(_maxC - 1.25))));\n"
+                     "    }\n"
+                     "    _return_value = float4(saturate(ret.xyz), 1.0);\n}\n";
+    }
+    else
+    {
+        returnCode = "_return_value = float4(saturate(ret.xyz), 1.0);\n}\n";
+    }
 
     if (bracesOpen == 0)
     {
